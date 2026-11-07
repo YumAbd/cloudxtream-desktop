@@ -1,0 +1,109 @@
+name: Phase 0 - can CloudXtream run on Windows?
+on:
+  push:
+    branches: [main]
+    paths: ['phase0/**', 'scripts/**', '.github/workflows/phase0.yml']
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: Catalog extensions to exercise (internal names, space separated)
+        default: Pencurimovie MovieBoxProvider
+
+permissions:
+  contents: read
+
+env:
+  # Official CloudStream commit the Android app is built from.
+  UPSTREAM_SHA: 5024ace2922a148d38df2a816b483b529789cf58
+  CATALOG_URL: https://raw.githubusercontent.com/YumAbd/cloudstream-leque/apk-build/sumber.json
+  PROVIDERS: ${{ inputs.providers || 'Pencurimovie MovieBoxProvider' }}
+
+jobs:
+  build:
+    name: Build the CloudStream library and the extensions for desktop Java
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK (the official build needs it even for the desktop library)
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDK_MANAGER" --licenses > /dev/null || true
+          "$SDK_MANAGER" --install 'platforms;android-37.0'
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '9.4.1'
+      - name: Official CloudStream library for desktop Java
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 https://github.com/recloudstream/cloudstream.git upstream
+          git -C upstream fetch --quiet --depth 1 origin "$UPSTREAM_SHA"
+          git -C upstream checkout --quiet --detach "$UPSTREAM_SHA"
+          (cd upstream && ./gradlew --no-daemon :library:publishToMavenLocal)
+          POM="$(find ~/.m2/repository/com/lagradost/api/library-jvm -name '*.pom' | head -n 1)"
+          VERSION="$(basename "$(dirname "$POM")")"
+          echo "CX_LIBRARY=com.lagradost.api:library-jvm:$VERSION" >> "$GITHUB_ENV"
+          echo "Library: com.lagradost.api:library-jvm:$VERSION"
+      - name: Catalog extension sources
+        run: python3 scripts/prepare_extensions.py "$CATALOG_URL" phase0/build
+      - name: Compile the extensions for desktop Java
+        run: |
+          cd phase0
+          gradle --no-daemon --continue -PcxLibrary="$CX_LIBRARY" :stubs:jar :probe:installDist compileExtensions 2>&1 | tee build/compile.log || true
+          test -x probe/build/install/probe/bin/probe
+      - name: Compatibility report
+        run: python3 scripts/compat_report.py phase0/build | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Exercise providers from a Linux runner
+        run: |
+          phase0/probe/build/install/probe/bin/probe phase0/build/ext-jars phase0/build/probe-linux.json phase0/build/links-linux.json $PROVIDERS || true
+          { echo; echo '## Phase 0: provider test on Linux'; echo '```'; cat phase0/build/probe-linux.json | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tests',[])]" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: phase0-build
+          path: |
+            phase0/probe/build/install
+            phase0/build/ext-jars
+            phase0/build/extensions.json
+            phase0/build/probe-linux.json
+            phase0/build/compat.md
+            phase0/build/compile.log
+          retention-days: 14
+
+  windows:
+    name: Run on Windows and play a video with libVLC
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: phase0-build
+          path: phase0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Exercise providers on Windows
+        shell: bash
+        run: |
+          ls phase0
+          phase0/probe/build/install/probe/bin/probe.bat phase0/build/ext-jars windows.json links-windows.json $PROVIDERS || true
+          { echo '## Phase 0: provider test on Windows'; echo '```'; python -c "import sys,json;[print(t) for t in json.load(open('windows.json')).get('tests',[])]" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Install VLC
+        run: choco install vlc -y --no-progress
+      - name: Play the first video link with libVLC
+        shell: bash
+        run: python scripts/vlc_check.py links-windows.json vlc-out | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: phase0-windows
+          path: windows.json
+          retention-days: 14
