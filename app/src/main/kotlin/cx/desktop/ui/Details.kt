@@ -17,10 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +35,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,13 +64,15 @@ private fun episodeLabel(e: Episode): String =
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
-    var details by remember { mutableStateOf<LoadResponse?>(null) }
+    // Kept for the session: coming back from the player shows the page at once.
+    var details by remember { mutableStateOf<LoadResponse?>(HomeCache.details[screen.url]) }
     var error by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
     LaunchedEffect(attempt) {
+        if (details != null && attempt == 0) return@LaunchedEffect
         error = null
         runCatching { withTimeout(45_000) { withContext(Dispatchers.IO) { screen.api.load(screen.url) } } }
-            .onSuccess { if (it == null) error = tr("Tiada maklumat.", "No information.") else details = it }
+            .onSuccess { if (it == null) error = tr("Tiada maklumat.", "No information.") else { details = it; HomeCache.details[screen.url] = it } }
             .onFailure { error = Plugins.describe(it) }
     }
     val d = details
@@ -186,7 +185,7 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
             Row(
                 Modifier.padding(horizontal = 32.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(if (hovered) Palette.surfaceHigh else Palette.surface).hoverable(hover)
-                    .clickable { play(Playable(e.data, episodeLabel(e), e.season, e)) }.padding(12.dp),
+                    .handCursor().clickable { play(Playable(e.data, episodeLabel(e), e.season, e)) }.padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -221,12 +220,12 @@ private fun LibraryActions(screen: Screen.Details, title: String, poster: String
             Pill((entry.status?.let { statusLabel(it) } ?: tr("+ Tambah ke senarai", "+ Add to list")) + "  ▾", entry.status != null) { open = true }
             androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 cx.desktop.core.WatchStatus.entries.forEach { s ->
-                    androidx.compose.material3.DropdownMenuItem(text = { Text(statusLabel(s)) }, onClick = {
+                    androidx.compose.material3.DropdownMenuItem(modifier = Modifier.handCursor(), text = { Text(statusLabel(s)) }, onClick = {
                         open = false
                         entry = cx.desktop.core.Library.update(base) { it.copy(status = s, title = title, poster = poster) }
                     })
                 }
-                if (entry.status != null) androidx.compose.material3.DropdownMenuItem(text = { Text(tr("Buang daripada senarai", "Remove from list")) }, onClick = {
+                if (entry.status != null) androidx.compose.material3.DropdownMenuItem(modifier = Modifier.handCursor(), text = { Text(tr("Buang daripada senarai", "Remove from list")) }, onClick = {
                     open = false
                     entry = cx.desktop.core.Library.update(base) { it.copy(status = null) }
                 })
@@ -271,7 +270,7 @@ private fun DownloadPicker(api: com.lagradost.cloudstream3.MainAPI, data: String
                 if (!loading && usable.isEmpty()) Text(tr("Tiada sumber yang boleh dimuat turun.", "No downloadable source."), color = Palette.muted)
                 usable.take(12).forEach { link ->
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh).clickable {
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh).handCursor().clickable {
                             cx.desktop.core.Downloads.start(title, label, poster, link.url, link.referer, link.headers,
                                 hls = link.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8)
                             onClose()

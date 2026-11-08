@@ -77,7 +77,7 @@ fun PosterCard(item: CardItem, horizontal: Boolean = false) {
     val menu = if (item.onRemove != null) listOf(ContextMenuItem(tr("Buang", "Remove")) { item.onRemove.invoke() }) else emptyList()
     ContextMenuArea(items = { menu }) {
         Column(
-            Modifier.width(width).hoverable(hover).clickable(onClick = item.onClick),
+            Modifier.width(width).hoverable(hover).handCursor().clickable(onClick = item.onClick),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Box(
@@ -99,7 +99,7 @@ fun PosterCard(item: CardItem, horizontal: Boolean = false) {
                 if (hovered && item.onRemove != null) {
                     Box(
                         Modifier.align(Alignment.TopEnd).padding(6.dp).size(26.dp).clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.7f)).clickable { item.onRemove.invoke() },
+                            .background(Color.Black.copy(alpha = 0.7f)).handCursor().clickable { item.onRemove.invoke() },
                         contentAlignment = Alignment.Center,
                     ) { Icon(Icons.Filled.Close, tr("Buang", "Remove"), tint = Color.White, modifier = Modifier.size(16.dp)) }
                 }
@@ -148,7 +148,7 @@ private fun RowArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, modi
             Brush.horizontalGradient(listOf(Palette.background.copy(alpha = 0.9f), Color.Transparent).let {
                 if (icon == Icons.Filled.ChevronRight) it.reversed() else it
             })
-        ).clickable(onClick = onClick),
+        ).handCursor().clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, null, tint = Color.White, modifier = Modifier.size(36.dp)) }
 }
@@ -157,7 +157,7 @@ private fun RowArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, modi
 fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(50)).background(if (selected) Palette.primary else Palette.surfaceHigh)
-            .clickable(onClick = onClick).padding(horizontal = 15.dp, vertical = 8.dp)
+            .handCursor().clickable(onClick = onClick).padding(horizontal = 15.dp, vertical = 8.dp)
     ) {
         Text(text, color = if (selected) Color.White else Palette.text.copy(alpha = 0.8f), fontSize = 13.sp)
     }

@@ -142,8 +142,10 @@ private fun App() {
 
     suspend fun afterAuthorized(result: Activation.Result.Authorized) {
         if (!pluginsLoaded) {
-            phase = Phase.Loading(tr("Menyediakan extension…", "Preparing extensions…"), 0f)
-            val summary = Plugins.sync { text, fraction -> phase = Phase.Loading(text, fraction) }
+            phase = Phase.Loading(tr("Memuatkan CloudXtream…", "Loading CloudXtream…") + " 0%", 0f)
+            val summary = Plugins.sync { _, fraction ->
+                phase = Phase.Loading(tr("Memuatkan CloudXtream…", "Loading CloudXtream…") + " ${(fraction * 100).toInt()}%", fraction)
+            }
             pluginsLoaded = true
             AppState.extensionsLoaded = true
             loadWarning = when {

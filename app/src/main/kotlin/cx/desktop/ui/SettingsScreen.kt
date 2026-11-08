@@ -17,14 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,7 +69,7 @@ fun SettingsScreen(section: String, account: AccountInfo, onSection: (String) ->
                     fontWeight = if (id == section) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                         .background(if (id == section) Palette.primary.copy(alpha = 0.22f) else Palette.background)
-                        .clickable { onSection(id) }.padding(horizontal = 14.dp, vertical = 11.dp),
+                        .handCursor().clickable { onSection(id) }.padding(horizontal = 14.dp, vertical = 11.dp),
                 )
             }
         }
@@ -107,7 +105,7 @@ private fun Toggle(title: String, detail: String?, value: Boolean, onChange: (Bo
             Text(title, color = Palette.text)
             detail?.let { Text(it, color = Palette.muted, fontSize = 12.sp) }
         }
-        Switch(value, onChange, colors = SwitchDefaults.colors(checkedTrackColor = Palette.primary))
+        Switch(value, onChange, Modifier.handCursor(), colors = SwitchDefaults.colors(checkedTrackColor = Palette.primary))
     }
 }
 
@@ -135,7 +133,7 @@ private fun General() {
         Text(tr("Jenis kandungan yang dipaparkan di Utama dan Cari. Sumber lain disembunyikan.", "Content types shown in Home and Search. Other sources are hidden."), color = Palette.muted, fontSize = 12.sp)
         Prefs.allTypes.forEach { (id, _) ->
             val label = if (id == "NSFW") "NSFW" else typeLabel(id)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().handCursor().clickable {
                 if (id == "NSFW" && id !in types) confirmAdult = true
                 else { types = if (id in types) types - id else types + id; Prefs.preferredTypes = types }
             }) {

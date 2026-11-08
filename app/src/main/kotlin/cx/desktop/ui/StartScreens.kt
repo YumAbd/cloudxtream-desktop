@@ -17,12 +17,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -129,7 +127,7 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
                     replaceChoices.forEach { device ->
                         Column(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh)
-                                .clickable { replaceChoices = emptyList(); activate(device.id) }.padding(12.dp)
+                                .handCursor().clickable { replaceChoices = emptyList(); activate(device.id) }.padding(12.dp)
                         ) {
                             Text(device.label, color = Palette.text, fontWeight = FontWeight.SemiBold)
                             if (device.lastSeenMs > 0) Text(tr("Terakhir digunakan: ", "Last used: ") + format.format(Date(device.lastSeenMs)), color = Palette.muted, fontSize = 12.sp)

@@ -43,8 +43,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,6 +101,8 @@ fun visibleProviders(): List<MainAPI> {
 @Composable
 fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
     val screen = navigator.current
+    // Keeps each screen's scroll position while the player or another screen is open.
+    val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     if (screen is Screen.Player) {
         PlayerScreen(screen.request, onBack = { navigator.back() }, onPlayNext = { navigator.replace(Screen.Player(it)) })
         return
@@ -117,6 +119,7 @@ fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
                 TextButton(onClick = { navigator.back() }, modifier = Modifier.padding(start = 12.dp, top = 8.dp)) { Text(tr("← Kembali", "← Back")) }
             }
             Box(Modifier.weight(1f)) {
+                saved.SaveableStateProvider(screenKey(screen)) {
                 when (screen) {
                     Screen.Home -> HomeScreen(navigator)
                     is Screen.Search -> key(screen.query) { SearchScreen(navigator, screen.query) }
@@ -125,6 +128,7 @@ fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
                     is Screen.Settings -> SettingsScreen(screen.section, account) { navigator.replace(Screen.Settings(it)) }
                     is Screen.Details -> key(screen) { DetailsScreen(navigator, screen) }
                     is Screen.Player -> Unit
+                }
                 }
             }
         }
@@ -141,7 +145,7 @@ private fun NavRail(navigator: Navigator, account: AccountInfo) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Image(painterResource("icon.png"), null, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable { navigator.home() })
+        Image(painterResource("icon.png"), null, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).handCursor().clickable { navigator.home() })
         Spacer(Modifier.height(14.dp))
         RailItem(Icons.Filled.Home, tr("Utama", "Home"), root == Screen.Home) { navigator.root(Screen.Home) }
         RailItem(Icons.Filled.Search, tr("Cari", "Search"), root is Screen.Search) { navigator.root(Screen.Search()) }
@@ -164,7 +168,7 @@ private fun RailItem(icon: ImageVector, label: String, selected: Boolean, onClic
     Column(
         Modifier.width(80.dp).clip(RoundedCornerShape(12.dp))
             .background(if (selected) Palette.primary.copy(alpha = 0.22f) else if (hovered) Palette.surfaceHigh else Palette.surface)
-            .hoverable(hover).clickable(onClick = onClick).padding(vertical = 10.dp),
+            .hoverable(hover).handCursor().clickable(onClick = onClick).padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -174,19 +178,27 @@ private fun RailItem(icon: ImageVector, label: String, selected: Boolean, onClic
 }
 
 /** Home rows are kept per provider so Back does not reload them. */
-private object HomeCache {
+object HomeCache {
     val rows = mutableMapOf<String, List<HomePageList>>()
     val details = java.util.concurrent.ConcurrentHashMap<String, LoadResponse>()
+    var serverChecked = false
 }
 
 @Composable
 private fun HomeScreen(navigator: Navigator) {
     val providers = remember(Lang.code) { visibleProviders().filter { it.hasMainPage && it.mainPage.isNotEmpty() } }
-    var selected by remember { mutableStateOf<MainAPI?>(null) }
+    // Chosen at once from the saved choice (or the admin default cached from the last start), so
+    // returning to Home never waits for the network.
+    fun pick(): MainAPI? = Settings.string("home_provider")?.let { name -> providers.firstOrNull { it.name == name } }
+        ?: Settings.string("server_default_provider")?.let { internal -> providers.firstOrNull { it.sourcePlugin == internal } }
+        ?: providers.firstOrNull()
+    var selected by remember { mutableStateOf(pick()) }
     LaunchedEffect(Unit) {
-        val chosen = Settings.string("home_provider")?.let { name -> providers.firstOrNull { it.name == name } }
-        val server = Remote.defaultProvider()?.let { internal -> providers.firstOrNull { it.sourcePlugin == internal } }
-        selected = chosen ?: server ?: providers.firstOrNull()
+        if (!HomeCache.serverChecked) {
+            HomeCache.serverChecked = true
+            Remote.defaultProvider()
+            if (Settings.string("home_provider") == null) pick()?.let { if (it != selected) selected = it }
+        }
     }
     val api = selected
     val rows = remember(api) { mutableStateListOf<HomePageList>().apply { api?.let { HomeCache.rows[it.name]?.let(::addAll) } } }
@@ -293,24 +305,24 @@ private fun Hero(api: MainAPI, items: List<SearchResponse>, navigator: Navigator
             if (meta.isNotEmpty()) Text(meta.joinToString("   •   "), color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
             d?.plot?.let { Text(it, color = Color.White.copy(alpha = 0.8f), maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, lineHeight = 20.sp) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                androidx.compose.material3.Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {
+                Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {
                     Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(tr("Tonton", "Play"), fontWeight = FontWeight.Bold)
                 }
-                androidx.compose.material3.Button(onClick = {
+                Button(onClick = {
                     Library.update(cx.desktop.core.LibraryEntry(api.name, item.url, item.name, item.posterUrl)) { it.copy(status = it.status ?: WatchStatus.PLAN) }
-                }, colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
+                }, colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
                     Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text(tr("Senarai saya", "My list"))
                 }
-                androidx.compose.material3.Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
+                Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
                     Icon(Icons.Filled.Info, null); Spacer(Modifier.width(6.dp)); Text(tr("Maklumat", "More info"))
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items.indices.forEach { i ->
                     Box(Modifier.size(if (i == index) 22.dp else 8.dp, 4.dp).clip(RoundedCornerShape(2.dp))
-                        .background(if (i == index) Color.White else Color.White.copy(alpha = 0.35f)).clickable { index = i })
+                        .background(if (i == index) Color.White else Color.White.copy(alpha = 0.35f)).handCursor().clickable { index = i })
                 }
             }
         }
@@ -344,7 +356,7 @@ private fun ProviderPicker(providers: List<MainAPI>, selected: MainAPI?, onSelec
             Pill(tr("Sumber: ", "Source: ") + (selected?.name ?: tr("pilih", "choose")) + "  ▾", true) { open = true }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 providers.forEach { api ->
-                    DropdownMenuItem(text = { Text(api.name) }, onClick = { open = false; onSelect(api) })
+                    DropdownMenuItem(modifier = Modifier.handCursor(), text = { Text(api.name) }, onClick = { open = false; onSelect(api) })
                 }
             }
         }
@@ -558,4 +570,14 @@ private fun recentSearches(): List<String> = Settings.string("recent_searches")?
 
 private fun rememberSearch(q: String) {
     Settings.set("recent_searches", (listOf(q) + recentSearches().filter { it != q }).take(8).joinToString("\n"))
+}
+
+private fun screenKey(screen: Screen): String = when (screen) {
+    Screen.Home -> "home"
+    is Screen.Search -> "search:" + screen.query
+    Screen.Library -> "library"
+    Screen.Downloads -> "downloads"
+    is Screen.Settings -> "settings:" + screen.section
+    is Screen.Details -> "details:" + screen.api.name + ":" + screen.url
+    is Screen.Player -> "player"
 }

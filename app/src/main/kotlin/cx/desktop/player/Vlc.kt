@@ -49,10 +49,9 @@ object Vlc {
     @Synchronized fun register(player: VideoPlayer) { players += player }
     @Synchronized fun unregister(player: VideoPlayer) { players -= player }
     @Synchronized fun stopAll() { players.toList().forEach { it.stop() } }
+    /** At exit: players stop in the background; the process ends right after. */
     @Synchronized fun release() {
         players.toList().forEach { it.release() }
-        factory?.release()
-        factory = null
     }
 }
 
@@ -192,10 +191,13 @@ class VideoPlayer {
         player.submit { player.controls().stop() }
     }
 
+    /** Stopping a network stream can take seconds in libVLC, so it never runs on the UI thread. */
     fun release() {
         Vlc.unregister(this)
-        runCatching { player.controls().stop() }
-        runCatching { player.release() }
+        Thread({
+            runCatching { player.controls().stop() }
+            runCatching { player.release() }
+        }, "vlc-release").apply { isDaemon = true }.start()
     }
 }
 

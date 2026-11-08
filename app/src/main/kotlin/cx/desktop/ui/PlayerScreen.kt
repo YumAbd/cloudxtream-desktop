@@ -18,12 +18,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -186,16 +184,26 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
             }
         }
     }
-    // A source that fails is replaced by the next untried one.
+    // A source that fails, or shows nothing for 25 seconds, is replaced by the next untried one.
+    fun tryNext() {
+        val next = links.sortedByDescending { it.quality }.firstOrNull { it.url !in tried }
+        if (next != null) {
+            notice = tr("Sumber gagal, mencuba ", "Source failed, trying ") + next.label() + "…"
+            start(next, player.timeMs)
+        } else {
+            notice = tr("Semua sumber gagal dimainkan. Cuba muat turun, atau pilih sumber lain.", "No source could be played. Try downloading, or pick another source.")
+        }
+    }
     LaunchedEffect(player.failed) {
-        if (player.failed) {
-            val next = links.sortedByDescending { it.quality }.firstOrNull { it.url !in tried }
-            if (next != null) {
-                notice = tr("Sumber gagal, mencuba ", "Source failed, trying ") + next.label() + "…"
-                start(next, player.timeMs)
-            } else {
-                notice = tr("Semua sumber gagal dimainkan.", "No source could be played.")
-            }
+        if (player.failed) tryNext()
+    }
+    LaunchedEffect(current) {
+        val link = current ?: return@LaunchedEffect
+        val frames = player.frameCount
+        delay(25_000)
+        if (current == link && player.frameCount == frames && !player.ended && !player.failed) {
+            System.err.println("player: no picture after 25 s from " + link.source)
+            tryNext()
         }
     }
     LaunchedEffect(player.ended) {
@@ -241,7 +249,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
             }
     ) {
         val image = player.frame
-        Canvas(Modifier.fillMaxSize().clickable(indication = null, interactionSource = null) { player.togglePause() }) {
+        Canvas(Modifier.fillMaxSize().handCursor().clickable(indication = null, interactionSource = null) { player.togglePause() }) {
             player.frameCount // redraw on each decoded frame
             if (image != null && image.width > 0) synchronized(player.frameLock) {
                 val scale = min(size.width / image.width, size.height / image.height)
@@ -329,11 +337,11 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                         .background(if (link == current) Palette.primary else Palette.surfaceHigh)
-                                        .clickable { panel = null; start(link, player.timeMs) }.padding(10.dp)
+                                        .handCursor().clickable { panel = null; start(link, player.timeMs) }.padding(10.dp)
                                 ) {
                                     Text(link.label() + "  (" + link.type.name + ")", color = Palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
                                     if (link.type == ExtractorLinkType.M3U8 || link.type == ExtractorLinkType.VIDEO) Text("⬇", color = Palette.text,
-                                        modifier = Modifier.clickable {
+                                        modifier = Modifier.handCursor().clickable {
                                             cx.desktop.core.Downloads.start(request.title, request.episodeLabel, request.poster, link.url, link.referer, link.headers,
                                                 hls = link.type == ExtractorLinkType.M3U8)
                                             notice = tr("Muat turun bermula: lihat menu Muat turun.", "Download started: see Downloads.")
@@ -348,14 +356,14 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                             item {
                                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                     .background(if (subtitle == null) Palette.primary else Palette.surfaceHigh)
-                                    .clickable { subtitle = null; player.disableSubtitles(); panel = null }.padding(10.dp)) {
+                                    .handCursor().clickable { subtitle = null; player.disableSubtitles(); panel = null }.padding(10.dp)) {
                                     Text(tr("Tiada", "Off"), color = Palette.text, fontSize = 13.sp)
                                 }
                             }
                             items(subtitles.toList()) { s ->
                                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                     .background(if (s == subtitle) Palette.primary else Palette.surfaceHigh)
-                                    .clickable { subtitle = s; player.addSubtitle(s.url, s.headers); panel = null }.padding(10.dp)) {
+                                    .handCursor().clickable { subtitle = s; player.addSubtitle(s.url, s.headers); panel = null }.padding(10.dp)) {
                                     Text(s.lang, color = Palette.text, fontSize = 13.sp)
                                 }
                             }

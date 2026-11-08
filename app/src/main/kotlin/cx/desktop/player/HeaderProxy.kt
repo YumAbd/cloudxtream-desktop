@@ -53,7 +53,7 @@ object HeaderProxy {
         val headers = sessions[session] ?: run { exchange.sendResponseHeaders(403, -1); return }
         val target = query["u"]?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
             ?: run { exchange.sendResponseHeaders(400, -1); return }
-        val request = Request.Builder().url(target).apply {
+        val request = Request.Builder().url(target).get().apply {
             headers.forEach { (k, v) -> runCatching { header(k, v) } }
             exchange.requestHeaders.getFirst("Range")?.let { header("Range", it) }
             if (headers.keys.none { it.equals("user-agent", true) }) header("User-Agent", cx.desktop.ui.Images.USER_AGENT)
@@ -62,7 +62,14 @@ object HeaderProxy {
             val body = response.body
             val type = response.header("Content-Type").orEmpty()
             val finalUrl = response.request.url.toString()
-            val playlist = type.contains("mpegurl", true) || response.request.url.encodedPath.endsWith(".m3u8", true)
+            // Some hosts serve HLS playlists as text/plain or octet-stream under other names: look inside.
+            val playlist = type.contains("mpegurl", true) || response.request.url.encodedPath.endsWith(".m3u8", true) ||
+                (response.isSuccessful && !type.startsWith("video/") && runCatching { response.peekBody(256).string() }.getOrDefault("").trimStart().startsWith("#EXTM3U"))
+            if (exchange.requestMethod.equals("HEAD", true)) {
+                exchange.responseHeaders.add("Content-Type", if (playlist) "application/vnd.apple.mpegurl" else type.ifBlank { "application/octet-stream" })
+                exchange.sendResponseHeaders(response.code, -1)
+                return
+            }
             if (playlist) {
                 val text = body.string()
                 val bytes = rewrite(text, URI.create(finalUrl), session).toByteArray(Charsets.UTF_8)
