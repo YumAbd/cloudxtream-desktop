@@ -5,7 +5,7 @@ name: Dependencies - publish the official CloudStream library to the maven branc
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/deps.yml']
+    paths: ['.github/workflows/deps.yml', 'app/build.gradle.kts', 'shim/build.gradle.kts', 'build.gradle.kts', 'settings.gradle.kts']
   workflow_dispatch:
 
 permissions:
@@ -16,14 +16,24 @@ env:
 
 jobs:
   publish:
+    # Only when the pinned commit is not published yet (or on manual runs).
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - name: Already published?
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" != workflow_dispatch ] && \
+             curl -fsS "https://raw.githubusercontent.com/${{ github.repository }}/maven/UPSTREAM_SHA" | grep -qx "$UPSTREAM_SHA"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-java@v5
+        if: steps.check.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: '17'
       - name: Android SDK
+        if: steps.check.outputs.skip != 'true'
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           SDK_MANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
@@ -31,6 +41,7 @@ jobs:
           yes | "$SDK_MANAGER" --licenses > /dev/null || true
           "$SDK_MANAGER" --install 'platforms;android-37.0'
       - name: Build the library at the pinned commit
+        if: steps.check.outputs.skip != 'true'
         run: |
           set -euo pipefail
           git clone --quiet --depth 1 https://github.com/recloudstream/cloudstream.git upstream
@@ -38,6 +49,7 @@ jobs:
           git -C upstream checkout --quiet --detach "$UPSTREAM_SHA"
           (cd upstream && ./gradlew --no-daemon :library:publishToMavenLocal)
       - name: Collect the library and its JitPack dependencies
+        if: steps.check.outputs.skip != 'true'
         run: |
           set -euo pipefail
           mkdir -p out/com/lagradost
@@ -63,6 +75,7 @@ jobs:
           echo "$UPSTREAM_SHA" > out/UPSTREAM_SHA
           find out -type f | sort
       - name: Publish to the maven branch
+        if: steps.check.outputs.skip != 'true'
         run: |
           set -euo pipefail
           cd out
@@ -72,3 +85,48 @@ jobs:
           git add -A
           git commit -q -m "CloudStream library at official commit ${UPSTREAM_SHA}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" maven
+
+  androidx:
+    if: always() && needs.publish.result == 'success'
+    # Compose Desktop depends on AndroidX artifacts that only Google's repository serves; they are
+    # mirrored to the maven branch so the app also builds where that repository is not reachable.
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '9.4.1'
+          cache-disabled: true
+      - name: Resolve every dependency of the app
+        run: gradle --no-daemon -q :app:resolveAll
+      - name: Add the AndroidX artifacts to the maven branch
+        run: |
+          set -euo pipefail
+          git clone -q --depth 1 -b maven "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" mirror
+          cache=~/.gradle/caches/modules-2/files-2.1
+          for groupdir in "$cache"/androidx.*; do
+            group="$(basename "$groupdir")"
+            for moduledir in "$groupdir"/*; do
+              module="$(basename "$moduledir")"
+              for versiondir in "$moduledir"/*; do
+                version="$(basename "$versiondir")"
+                target="mirror/${group//.//}/$module/$version"
+                mkdir -p "$target"
+                find "$versiondir" -type f -exec cp {} "$target/" \;
+              done
+            done
+          done
+          cd mirror
+          git config user.name YumAbd
+          git config user.email 92353848+YumAbd@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing new"; exit 0; fi
+          git diff --cached --stat | tail -n 1
+          git commit -q -m "AndroidX artifacts used by the app"
+          git push -q origin maven
