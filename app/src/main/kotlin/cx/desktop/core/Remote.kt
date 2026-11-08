@@ -11,7 +11,7 @@ import java.time.Duration
 
 /** Public app configuration from the CloudXtream server (no secrets). */
 object Remote {
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(10)).build()
 
     /** The Home provider chosen in the admin panel (extension internal name), cached for offline starts. */
     suspend fun defaultProvider(): String? = withContext(Dispatchers.IO) {

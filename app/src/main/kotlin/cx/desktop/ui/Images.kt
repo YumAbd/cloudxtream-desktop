@@ -29,7 +29,7 @@ import java.time.Duration
 /** Posters: memory cache, then disk cache, then network (with the provider's headers). */
 object Images {
     private val dir = File(AppDirs.cache, "img").apply { mkdirs() }
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(10))
         .followRedirects(HttpClient.Redirect.NORMAL).build()
     private val slots = Semaphore(8)
     private val memory = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {

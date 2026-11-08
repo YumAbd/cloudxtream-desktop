@@ -31,6 +31,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 fun main() {
+    // Use the proxy configured in Windows (or given with -Dhttps.proxyHost) for every connection.
+    if (System.getProperty("https.proxyHost") == null) System.setProperty("java.net.useSystemProxies", "true")
     System.setProperty("skiko.renderApi", System.getProperty("skiko.renderApi") ?: "DIRECT3D".takeIf { isWindows } ?: "OPENGL")
     application {
         val window = rememberWindowState(width = 1320.dp, height = 820.dp)

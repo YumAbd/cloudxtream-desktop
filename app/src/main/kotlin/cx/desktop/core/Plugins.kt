@@ -46,7 +46,7 @@ object Plugins {
     const val CATALOG_URL = "${Activation.ORIGIN}/catalog/sumber.json"
     private val catalogFile = File(AppDirs.plugins, "catalog.json")
     private val converted = File(AppDirs.plugins, "converted").apply { mkdirs() }
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15))
+    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(15))
         .followRedirects(HttpClient.Redirect.NORMAL).build()
 
     data class Failure(val name: String, val reason: String)
@@ -72,7 +72,7 @@ object Plugins {
             catalog.map { entry ->
                 async {
                     slots.withPermit {
-                        runCatching { ensureDownloaded(entry) }.onFailure { failures += Failure(entry.name ?: entry.internalName, "muat turun gagal") }
+                        runCatching { ensureDownloaded(entry) }.onFailure { failures += Failure(entry.name ?: entry.internalName, "muat turun gagal: " + describe(it)) }
                         synchronized(this@Plugins) { done++ }
                         progress("Memuat turun extension ($done/${catalog.size})…", 0.5f * done / catalog.size.coerceAtLeast(1))
                     }
@@ -98,8 +98,8 @@ object Plugins {
         val marker = File(AppDirs.plugins, "${entry.internalName}.url")
         if (file.exists() && marker.exists() && marker.readText() == entry.url) return
         val bytes = download(entry.url)
-        ZipFile(File.createTempFile("cx", ".cs3", AppDirs.cache).apply { writeBytes(bytes); deleteOnExit() }).use { zip ->
-            require(zip.getEntry("classes.dex") != null) { "not an extension" }
+        java.util.zip.ZipInputStream(bytes.inputStream()).use { zip ->
+            require(generateSequence { zip.nextEntry }.any { it.name == "classes.dex" }) { "not an extension" }
         }
         file.writeAtomically(bytes)
         marker.writeText(entry.url)
@@ -119,13 +119,15 @@ object Plugins {
         val jar = File(converted, "${cs3.nameWithoutExtension}-$hash.jar")
         val manifest: Map<String, Any?> = ZipFile(cs3).use { zip ->
             if (!jar.exists()) {
+                // Older conversions of this extension.
+                converted.listFiles { f -> f.name.startsWith(cs3.nameWithoutExtension + "-") }?.forEach { it.delete() }
                 val dex = zip.getInputStream(zip.getEntry("classes.dex")).readBytes()
-                val tmp = File(converted, jar.name + ".tmp").apply { delete() }
+                val tmp = File(converted, "tmp-" + jar.name)
+                tmp.delete()
                 // Keep names as they are: Kotlin uses names such as "constructor-impl".
                 Dex2jar.from(dex).reUseReg(false).topoLogicalSort().skipDebug(false).dontSanitizeNames(true)
                     .optimizeSynchronized().computeFrames(true).to(tmp.toPath())
-                converted.listFiles { f -> f.name.startsWith(cs3.nameWithoutExtension + "-") }?.forEach { it.delete() }
-                tmp.renameTo(jar)
+                check(tmp.renameTo(jar)) { "conversion failed" }
             }
             zip.getEntry("manifest.json")?.let { json.readValue<Map<String, Any?>>(zip.getInputStream(it)) } ?: emptyMap()
         }

@@ -170,6 +170,9 @@ class VideoPlayer {
         get() = player.audio().volume()
         set(value) { player.submit { player.audio().setVolume(value.coerceIn(0, 150)) } }
 
+    /** The current video frame as PNG (for tests and diagnostics). */
+    fun snapshotPng(): ByteArray? = bitmap?.let { org.jetbrains.skia.Image.makeFromBitmap(it).encodeToData()?.bytes }
+
     fun stop() {
         player.submit { player.controls().stop() }
     }

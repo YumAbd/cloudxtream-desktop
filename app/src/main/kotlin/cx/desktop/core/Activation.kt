@@ -38,7 +38,7 @@ object Activation {
     private const val MAX_LEASE_S = 600L
     private val keyFile = File(AppDirs.root, "device.key")
     private val publicFile = File(AppDirs.root, "device.pub")
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(10))
         .followRedirects(HttpClient.Redirect.NEVER).build()
     private val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
 

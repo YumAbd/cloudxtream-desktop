@@ -76,3 +76,19 @@ tasks.register("resolveAll") {
         listOf("compileClasspath", "runtimeClasspath").forEach { configurations.getByName(it).resolve() }
     }
 }
+
+// Development only: the screens after activation, without the CloudXtream server (src/test).
+tasks.register<JavaExec>("devPreview") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("cx.desktop.DevPreviewKt")
+    jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-Xss4m")
+}
+
+// CI smoke test (src/test): extensions + bundled libVLC decode a real video. Args: output PNG.
+tasks.register<JavaExec>("smokeTest") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("cx.desktop.SmokeKt")
+    jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-Xss4m", "-Djava.awt.headless=true")
+    (findProperty("vlcDir") as String?)?.let { systemProperty("cx.vlc.dir", it) }
+    args(layout.buildDirectory.file("smoke-frame.png").get().asFile.absolutePath)
+}
