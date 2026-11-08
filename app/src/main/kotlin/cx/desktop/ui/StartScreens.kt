@@ -80,7 +80,7 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
     val scope = rememberCoroutineScope()
 
     fun activate(replace: String? = null) {
-        if (busy || pin.length != 6) return
+        if (busy || (pin.length != 6 && pin.length != 16)) return
         busy = true
         message = null
         scope.launch {
@@ -99,7 +99,7 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
         Text("Masukkan PIN pengaktifan daripada admin CloudXtream.", color = Palette.muted, textAlign = TextAlign.Center)
         OutlinedTextField(
             value = pin,
-            onValueChange = { value -> pin = value.filter { it.isLetterOrDigit() }.uppercase().take(6) },
+            onValueChange = { value -> pin = value.filter { it.isLetterOrDigit() }.uppercase().take(16) },
             singleLine = true,
             label = { Text("PIN (6 aksara)") },
             enabled = !busy,
@@ -108,7 +108,7 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
             modifier = Modifier.fillMaxWidth(),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 22.sp, letterSpacing = 6.sp, color = Palette.text),
         )
-        Button(onClick = { activate() }, enabled = !busy && pin.length == 6, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Button(onClick = { activate() }, enabled = !busy && (pin.length == 6 || pin.length == 16), modifier = Modifier.fillMaxWidth().height(48.dp)) {
             if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Aktifkan")
         }
         message?.let { Text(it, color = Palette.error, textAlign = TextAlign.Center) }
