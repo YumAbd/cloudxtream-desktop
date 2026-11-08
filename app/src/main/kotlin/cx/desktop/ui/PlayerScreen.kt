@@ -98,11 +98,19 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     var lastMove by remember { mutableStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var localPlaying by remember { mutableStateOf(false) }
     val tried = remember { mutableSetOf<String>() }
     val focus = remember { FocusRequester() }
+    val seekMs = cx.desktop.core.Prefs.seekSeconds * 1000L
     val scope = rememberCoroutineScope()
 
     fun start(link: ExtractorLink, at: Long) {
+        if (link.type == ExtractorLinkType.M3U8 || link.type == ExtractorLinkType.VIDEO) cx.desktop.core.Library.get(request.api?.name ?: "", request.url)
+            ?: request.api?.let { api ->
+                cx.desktop.core.Library.update(cx.desktop.core.LibraryEntry(api.name, request.url, request.title, request.poster)) {
+                    it.copy(status = it.status ?: cx.desktop.core.WatchStatus.WATCHING)
+                }
+            }
         current = link
         tried += link.url
         player.play(link.url, link.referer, link.headers, at)
@@ -110,9 +118,10 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     }
 
     fun save() {
+        val api = request.api ?: return
         if (player.timeMs < 5_000) return
         History.save(WatchEntry(
-            provider = request.api.name, url = request.url, title = request.title, poster = request.poster,
+            provider = api.name, url = request.url, title = request.title, poster = request.poster,
             episodeData = request.episodeData, episodeLabel = request.episodeLabel,
             positionMs = player.timeMs, durationMs = player.lengthMs,
         ))
@@ -127,10 +136,19 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
 
     // Collect the links from the provider; play the best one as soon as it arrives.
     LaunchedEffect(Unit) {
+        if (request.localFile != null) {
+            val f = java.io.File(request.localFile)
+            player.play(f.toURI().toString(), null, emptyMap(), request.startMs)
+            current = null
+            loadingLinks = false
+            localPlaying = true
+            return@LaunchedEffect
+        }
+        val api = request.api ?: return@LaunchedEffect
         withTimeoutOrNull(60_000) {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    request.api.loadLinks(request.episodeData, false,
+                    api.loadLinks(request.episodeData, false,
                         { s -> scope.launch { if (subtitles.none { it.url == s.url }) subtitles.add(s) } },
                         { l -> scope.launch { if (l.type != ExtractorLinkType.TORRENT && l.type != ExtractorLinkType.MAGNET && links.none { it.url == l.url }) links.add(l) } })
                 }
@@ -141,13 +159,24 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     LaunchedEffect(links.size) {
         if (current == null && links.isNotEmpty()) {
             delay(1500) // let a few sources arrive, then pick the best quality
-            if (current == null) start(links.maxBy { it.quality }, request.startMs)
+            if (current == null) {
+                val max = cx.desktop.core.Prefs.preferredQuality
+                val pick = if (max == 0) links.maxBy { it.quality }
+                    else links.filter { it.quality in 1..max }.maxByOrNull { it.quality } ?: links.maxBy { it.quality }
+                start(pick, request.startMs)
+            }
         }
     }
     // Default subtitle: Malay, then Indonesian, then English (like the Android app's auto subtitles).
     LaunchedEffect(subtitles.size) {
         if (subtitle == null && subtitles.isNotEmpty()) {
-            val pick = listOf("malay", "melayu", "ms", "indonesia", "id", "english", "en").firstNotNullOfOrNull { lang ->
+            val order = when (cx.desktop.core.Prefs.subtitleLanguage) {
+                "none" -> emptyList()
+                "id" -> listOf("indonesia", "id", "malay", "melayu", "ms", "english", "en")
+                "en" -> listOf("english", "en", "malay", "melayu", "ms", "indonesia", "id")
+                else -> listOf("malay", "melayu", "ms", "indonesia", "id", "english", "en")
+            }
+            val pick = order.firstNotNullOfOrNull { lang ->
                 subtitles.firstOrNull { it.lang.lowercase().startsWith(lang) }
             }
             if (pick != null) {
@@ -171,7 +200,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     LaunchedEffect(player.ended) {
         if (player.ended) {
             save()
-            request.next.firstOrNull()?.let { (data, label) ->
+            if (cx.desktop.core.Prefs.autoNext) request.next.firstOrNull()?.let { (data, label) ->
                 onPlayNext(request.copy(episodeData = data, episodeLabel = label, startMs = 0, next = request.next.drop(1)))
             }
         }
@@ -200,8 +229,8 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                 lastMove = System.currentTimeMillis()
                 when (e.key) {
                     Key.Spacebar, Key.K -> { player.togglePause(); true }
-                    Key.DirectionRight, Key.L -> { player.seekBy(10_000); true }
-                    Key.DirectionLeft, Key.J -> { player.seekBy(-10_000); true }
+                    Key.DirectionRight, Key.L -> { player.seekBy(seekMs); true }
+                    Key.DirectionLeft, Key.J -> { player.seekBy(-seekMs); true }
                     Key.DirectionUp -> { player.volume = player.volume + 10; true }
                     Key.DirectionDown -> { player.volume = player.volume - 10; true }
                     Key.F -> { AppWindow.toggleFullscreen(); true }
@@ -222,19 +251,19 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                     IntSize(w.roundToInt(), h.roundToInt()), filterQuality = FilterQuality.Medium)
             }
         }
-        if (player.buffering || current == null) {
+        if (player.buffering || (current == null && !localPlaying)) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (current != null || loadingLinks) CircularProgressIndicator()
+                if (current != null || loadingLinks || localPlaying) CircularProgressIndicator()
                 Text(
                     when {
-                        current != null -> "Memuatkan video…"
+                        current != null || localPlaying -> "Memuatkan video…"
                         loadingLinks -> "Mencari sumber video… (${links.size} dijumpai)"
                         else -> "Tiada sumber video dijumpai untuk tajuk ini."
                     },
                     color = Color.White,
                 )
-                if (current == null && !loadingLinks) Button(onClick = onBack) { Text("Kembali") }
+                if (current == null && !loadingLinks && !localPlaying) Button(onClick = onBack) { Text("Kembali") }
             }
         }
         if (controlsVisible || !player.playing) {
@@ -265,8 +294,8 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { player.togglePause() }) { Text(if (player.playing) "❚❚ Jeda" else "▶ Main", color = Color.White) }
-                    TextButton(onClick = { player.seekBy(-10_000) }) { Text("⟲ 10s", color = Color.White) }
-                    TextButton(onClick = { player.seekBy(10_000) }) { Text("10s ⟳", color = Color.White) }
+                    TextButton(onClick = { player.seekBy(-seekMs) }) { Text("⟲ ${seekMs / 1000}s", color = Color.White) }
+                    TextButton(onClick = { player.seekBy(seekMs) }) { Text("${seekMs / 1000}s ⟳", color = Color.White) }
                     Text("${formatTime(player.timeMs)} / ${formatTime(player.lengthMs)}", color = Color.White, fontSize = 13.sp)
                     Spacer(Modifier.weight(1f))
                     if (request.next.isNotEmpty()) TextButton(onClick = {
@@ -300,7 +329,15 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                         .background(if (link == current) Palette.primary else Palette.surfaceHigh)
                                         .clickable { panel = null; start(link, player.timeMs) }.padding(10.dp)
-                                ) { Text(link.label() + "  (" + link.type.name + ")", color = Palette.text, fontSize = 13.sp) }
+                                ) {
+                                    Text(link.label() + "  (" + link.type.name + ")", color = Palette.text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                    if (link.type == ExtractorLinkType.M3U8 || link.type == ExtractorLinkType.VIDEO) Text("⬇", color = Palette.text,
+                                        modifier = Modifier.clickable {
+                                            cx.desktop.core.Downloads.start(request.title, request.episodeLabel, request.poster, link.url, link.referer, link.headers,
+                                                hls = link.type == ExtractorLinkType.M3U8)
+                                            notice = "Muat turun bermula: lihat menu Muat turun."
+                                        }.padding(horizontal = 6.dp))
+                                }
                             }
                         }
                     }
@@ -331,7 +368,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                                 scope.launch {
                                     val ok = Activation.report(
                                         request.title + (request.episodeLabel?.let { " · $it" } ?: ""),
-                                        request.api.name,
+                                        request.api?.name ?: "fail tempatan",
                                         "Windows · " + (current?.label() ?: "tiada sumber") + " · ${links.size} sumber",
                                         "win-" + AppInfo.version,
                                     )

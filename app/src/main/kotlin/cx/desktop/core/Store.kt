@@ -75,3 +75,56 @@ object History {
         file.writeAtomically(json.writeValueAsBytes(entries))
     }
 }
+
+/** User preferences (Settings screen), with the same defaults as the Android app. */
+object Prefs {
+    /** Media types shown (General > Preferred media). NSFW is off unless chosen. */
+    val allTypes = listOf(
+        "Movie" to "Filem", "TvSeries" to "Siri TV", "Anime" to "Anime", "AsianDrama" to "Drama Asia",
+        "Cartoon" to "Kartun", "Documentary" to "Dokumentari", "Live" to "Siaran langsung", "NSFW" to "Dewasa (18+)",
+    )
+    var preferredTypes: Set<String>
+        get() = Settings.string("preferred_types")?.split(',')?.filter { it.isNotBlank() }?.toSet()
+            ?: allTypes.map { it.first }.filter { it != "NSFW" }.toSet()
+        set(value) = Settings.set("preferred_types", value.joinToString(","))
+
+    var downloadDir: java.io.File
+        get() = Settings.string("download_dir")?.let(::File)
+            ?: File(System.getProperty("user.home"), "Videos${File.separator}CloudXtream")
+        set(value) = Settings.set("download_dir", value.absolutePath)
+
+    var autoNext: Boolean
+        get() = Settings.bool("auto_next", true)
+        set(value) = Settings.set("auto_next", value)
+
+    /** First choice for subtitles: ms, id, en or none. */
+    var subtitleLanguage: String
+        get() = Settings.string("subtitle_language") ?: "ms"
+        set(value) = Settings.set("subtitle_language", value)
+
+    var seekSeconds: Int
+        get() = Settings.long("seek_seconds")?.toInt() ?: 10
+        set(value) = Settings.set("seek_seconds", value)
+
+    /** Preferred quality: 0 = highest, else the max height (1080, 720, 480). */
+    var preferredQuality: Int
+        get() = Settings.long("preferred_quality")?.toInt() ?: 0
+        set(value) = Settings.set("preferred_quality", value)
+
+    var networkCachingMs: Int
+        get() = Settings.long("network_caching")?.toInt() ?: 3000
+        set(value) = Settings.set("network_caching", value)
+
+    /** Poster size on Home and lists: 0 small, 1 medium, 2 large. */
+    var posterSize: Int
+        get() = Settings.long("poster_size")?.toInt() ?: 1
+        set(value) = Settings.set("poster_size", value)
+
+    var showContinueWatching: Boolean
+        get() = Settings.bool("show_continue", true)
+        set(value) = Settings.set("show_continue", value)
+
+    var autoCheckUpdates: Boolean
+        get() = Settings.bool("auto_updates", true)
+        set(value) = Settings.set("auto_updates", value)
+}

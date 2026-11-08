@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +48,7 @@ import cx.desktop.core.Plugins
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.launch
 
 /** A playable item of a title: the movie itself or one episode. */
 private data class Playable(val data: String, val label: String?, val season: Int?, val episode: Episode?)
@@ -99,6 +101,11 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
     val saved = remember { History.find(screen.api.name, screen.url) }
     val poster = d.posterUrl ?: screen.poster
 
+    var downloadFor by remember { mutableStateOf<Playable?>(null) }
+    downloadFor?.let { item ->
+        DownloadPicker(screen.api, item.data, d.name, item.label, poster) { downloadFor = null }
+    }
+
     fun play(item: Playable, startMs: Long = 0) {
         val following = if (item.episode != null) {
             episodes.dropWhile { it !== item.episode }.drop(1).map { it.data to episodeLabel(it) }
@@ -140,6 +147,8 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
                         }
                     }
                     if (single == null && episodes.isEmpty()) Text("Tiada video untuk tajuk ini.", color = Palette.muted)
+                    LibraryActions(screen, d.name, poster, d.type.name)
+                    if (single != null) TextButton(onClick = { downloadFor = Playable(single, null, null, null) }) { Text("⬇  Muat turun") }
                 }
             }
         }
@@ -166,8 +175,86 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
                     e.description?.let { Text(it, color = Palette.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 }
                 if (saved?.episodeData == e.data) Text("Sedang ditonton", color = Palette.primary, fontSize = 12.sp)
+                TextButton(onClick = { downloadFor = Playable(e.data, episodeLabel(e), e.season, e) }) { Text("⬇", fontSize = 16.sp) }
                 Text("▶", color = Palette.primary, fontSize = 18.sp, modifier = Modifier.width(24.dp))
             }
         }
     }
+}
+
+
+@Composable
+private fun LibraryActions(screen: Screen.Details, title: String, poster: String?, type: String) {
+    val base = cx.desktop.core.LibraryEntry(screen.api.name, screen.url, title, poster, type)
+    var entry by remember { mutableStateOf(cx.desktop.core.Library.get(screen.api.name, screen.url) ?: base) }
+    var open by remember { mutableStateOf(false) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            Pill((entry.status?.label ?: "+ Tambah ke senarai") + "  ▾", entry.status != null) { open = true }
+            androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                cx.desktop.core.WatchStatus.entries.forEach { s ->
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(s.label) }, onClick = {
+                        open = false
+                        entry = cx.desktop.core.Library.update(base) { it.copy(status = s, title = title, poster = poster) }
+                    })
+                }
+                if (entry.status != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Buang daripada senarai") }, onClick = {
+                    open = false
+                    entry = cx.desktop.core.Library.update(base) { it.copy(status = null) }
+                })
+            }
+        }
+        Pill(if (entry.favourite) "♥ Kegemaran" else "♡ Kegemaran", entry.favourite) {
+            entry = cx.desktop.core.Library.update(base) { it.copy(favourite = !it.favourite, title = title, poster = poster) }
+        }
+        Pill(if (entry.subscribed) "🔔 Dilanggan" else "🔔 Langgan", entry.subscribed) {
+            entry = cx.desktop.core.Library.update(base) { it.copy(subscribed = !it.subscribed, title = title, poster = poster) }
+        }
+    }
+}
+
+/** Loads the links of one movie/episode and lets the user pick the source to download. */
+@Composable
+private fun DownloadPicker(api: com.lagradost.cloudstream3.MainAPI, data: String, title: String, label: String?, poster: String?, onClose: () -> Unit) {
+    val links = remember { androidx.compose.runtime.mutableStateListOf<com.lagradost.cloudstream3.utils.ExtractorLink>() }
+    var loading by remember { mutableStateOf(true) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(data) {
+        kotlinx.coroutines.withTimeoutOrNull(60_000) {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    api.loadLinks(data, false, {}, { l -> scope.launch(Dispatchers.Main) { if (links.none { it.url == l.url }) links.add(l) } })
+                }
+            }
+        }
+        loading = false
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Muat turun: " + title + (label?.let { " · $it" } ?: "")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (loading) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("Mencari sumber… (${links.size})", color = Palette.muted)
+                }
+                val usable = links.filter { it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.VIDEO || it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8 }
+                    .sortedByDescending { it.quality }
+                if (!loading && usable.isEmpty()) Text("Tiada sumber yang boleh dimuat turun.", color = Palette.muted)
+                usable.take(12).forEach { link ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh).clickable {
+                            cx.desktop.core.Downloads.start(title, label, poster, link.url, link.referer, link.headers,
+                                hls = link.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8)
+                            onClose()
+                        }.padding(10.dp)
+                    ) {
+                        Text((link.name.ifBlank { link.source }) + (if (link.quality > 0) " · ${link.quality}p" else "") + " (${link.type.name})",
+                            color = Palette.text, fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Tutup") } },
+    )
 }

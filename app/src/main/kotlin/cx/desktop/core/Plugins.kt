@@ -54,6 +54,9 @@ object Plugins {
 
     @Volatile var catalog: List<CatalogEntry> = emptyList()
         private set
+    /** Result of the last sync (shown in Settings > Updates). */
+    @Volatile var lastSummary: Summary? = null
+        private set
     private val loadedFiles = mutableSetOf<String>()
 
     /** Downloads what changed in the catalog, then loads every extension not loaded yet. */
@@ -90,7 +93,7 @@ object Plugins {
             runCatching { load(file) }.onSuccess { loadedFiles += file.name }
                 .onFailure { failures += Failure(entry.name ?: entry.internalName, describe(it)) }
         }
-        Summary(loadedFiles.size, catalog.size, failures.toList(), offline = fresh == null)
+        Summary(loadedFiles.size, catalog.size, failures.toList(), offline = fresh == null).also { lastSummary = it }
     }
 
     private fun ensureDownloaded(entry: CatalogEntry) {

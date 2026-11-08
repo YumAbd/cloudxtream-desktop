@@ -37,7 +37,7 @@ fun main() {
                     progress = null
                 }
                 val p = progress
-                if (p != null) LoadingScreen(p.first, p.second) else MainScreens(remember { Navigator() }, "Dev", null, null)
+                if (p != null) LoadingScreen(p.first, p.second) else MainScreens(remember { Navigator() }, cx.desktop.ui.AccountInfo("Dev", null) {}, null)
             }
         }
     }

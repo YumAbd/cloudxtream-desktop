@@ -24,6 +24,7 @@ dependencies {
     implementation(project(":shim"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.11.0")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1")

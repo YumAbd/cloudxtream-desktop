@@ -144,7 +144,8 @@ class VideoPlayer {
         }
         val mrl = if (HeaderProxy.needed(all)) HeaderProxy.wrap(url, all) else url
         val options = buildList {
-            add(":network-caching=3000")
+            add(":network-caching=${cx.desktop.core.Prefs.networkCachingMs}")
+            add(":file-caching=1000")
             (referer?.takeIf { it.isNotBlank() } ?: lower["referer"])?.let { add(":http-referrer=$it") }
             add(":http-user-agent=" + (lower["user-agent"] ?: cx.desktop.ui.Images.USER_AGENT))
             if (startMs > 0) add(":start-time=${startMs / 1000}")

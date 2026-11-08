@@ -22,6 +22,7 @@ import cx.desktop.core.Activation
 import cx.desktop.core.Logs
 import cx.desktop.core.Plugins
 import cx.desktop.player.Vlc
+import cx.desktop.ui.AccountInfo
 import cx.desktop.ui.ActivationScreen
 import cx.desktop.ui.BlockedScreen
 import cx.desktop.ui.CxTheme
@@ -116,7 +117,7 @@ private fun App() {
             val summary = Plugins.sync { text, fraction -> phase = Phase.Loading(text, fraction) }
             pluginsLoaded = true
             loadWarning = when {
-                summary.loaded == 0 -> "Tiada extension dapat dimuatkan. Semak sambungan Internet dan mulakan semula app."
+                summary.loaded == 0 -> "Tiada extension dapat dimuatkan. Lihat Tetapan → Kemas kini → Extension untuk sebabnya."
                 summary.offline -> "Tiada sambungan ke server: extension yang sedia ada digunakan."
                 else -> null
             }
@@ -144,7 +145,12 @@ private fun App() {
         }
         is Phase.Blocked -> BlockedScreen(p.message) { scope.launch { check() } }
         is Phase.Ready -> {
-            MainScreens(navigator, p.displayName, p.licenseExpiresMs, loadWarning)
+            MainScreens(navigator, AccountInfo(p.displayName, p.licenseExpiresMs) {
+                Vlc.stopAll()
+                Activation.forgetDevice()
+                navigator.home()
+                phase = Phase.NeedPin(null)
+            }, loadWarning)
             // The license is checked again before each lease ends, like the Android app.
             LaunchedEffect(p) {
                 delay(p.leaseMs)

@@ -45,8 +45,9 @@ data class CardItem(
 fun PosterCard(item: CardItem, horizontal: Boolean = false) {
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
-    val width = if (horizontal) 260.dp else 150.dp
-    val height = if (horizontal) 146.dp else 225.dp
+    val scale = when (cx.desktop.core.Prefs.posterSize) { 0 -> 0.8f; 2 -> 1.2f; else -> 1f }
+    val width = (if (horizontal) 260.dp else 150.dp) * scale
+    val height = (if (horizontal) 146.dp else 225.dp) * scale
     Column(
         Modifier.width(width).hoverable(hover).clickable(onClick = item.onClick),
         verticalArrangement = Arrangement.spacedBy(6.dp),
