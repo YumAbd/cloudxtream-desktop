@@ -1,8 +1,6 @@
 name: Phase 0 - can CloudXtream run on Windows?
+# Phase 0 is finished (see phase0/RESULTS.md); it only runs when started by hand.
 on:
-  push:
-    branches: [main]
-    paths: ['phase0/**', 'scripts/**', '.github/workflows/phase0.yml']
   workflow_dispatch:
     inputs:
       providers:
