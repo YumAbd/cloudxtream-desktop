@@ -95,3 +95,11 @@ tasks.register<JavaExec>("smokeTest") {
     (findProperty("vlcDir") as String?)?.let { systemProperty("cx.vlc.dir", it) }
     args(layout.buildDirectory.file("smoke-frame.png").get().asFile.absolutePath)
 }
+
+// Admin panel content counts (src/test, .github/workflows/census.yml). Args: output JSON.
+tasks.register<JavaExec>("census") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("cx.desktop.CensusKt")
+    jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-Xss4m", "-Djava.awt.headless=true")
+    args((findProperty("out") as String?) ?: layout.buildDirectory.file("census.json").get().asFile.absolutePath)
+}
