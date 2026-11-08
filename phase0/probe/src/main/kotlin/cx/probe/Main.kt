@@ -111,7 +111,9 @@ private fun convert(cs3: File, cache: File): Pair<File, List<String>> {
         if (!out.exists()) {
             val dex = zip.getInputStream(zip.getEntry("classes.dex") ?: error("no classes.dex")).readBytes()
             val tmp = File(cache, out.name + ".tmp").apply { delete() }
-            Dex2jar.from(dex).reUseReg(false).topoLogicalSort().skipDebug(false)
+            // Keep names as they are: Kotlin uses names like "constructor-impl" that are valid in
+            // bytecode, and the converted code must call the library by its real method names.
+            Dex2jar.from(dex).reUseReg(false).topoLogicalSort().skipDebug(false).dontSanitizeNames(true)
                 .optimizeSynchronized().computeFrames(true).to(tmp.toPath())
             tmp.renameTo(out)
         }
@@ -163,7 +165,8 @@ private suspend fun exercise(api: MainAPI): Pair<Map<String, Any?>, Map<String, 
     val homeItems: List<SearchResponse> = home?.items?.flatMap { it.list }.orEmpty()
     result["home_items"] = homeItems.size
     val query = homeItems.firstOrNull()?.name?.split(' ')?.firstOrNull { it.length > 3 } ?: "love"
-    val found = step("search") { api.search(query) }.orEmpty()
+    // The app searches through the paged API; by default it falls back to search(query).
+    val found = step("search") { api.search(query, 1)?.items }.orEmpty()
     result["search_query"] = query
     result["search_results"] = found.size
     val target = homeItems.firstOrNull() ?: found.firstOrNull() ?: return result to null
