@@ -55,7 +55,8 @@ compose.desktop {
             licenseFile.set(rootProject.file("LICENSE"))
             // Bundled VLC (resources/windows/vlc), downloaded by the release workflow.
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
-            modules("java.net.http", "java.sql", "java.naming", "jdk.unsupported", "jdk.crypto.ec", "jdk.accessibility", "jdk.httpserver")
+            // Extensions may use any part of Java (dex2jar itself needs jdk.zipfs), so the whole runtime is bundled.
+            includeAllModules = true
             windows {
                 iconFile.set(project.file("icons/icon.ico"))
                 menu = true

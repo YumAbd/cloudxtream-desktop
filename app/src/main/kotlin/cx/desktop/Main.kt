@@ -19,6 +19,7 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import cx.desktop.core.Activation
+import cx.desktop.core.Logs
 import cx.desktop.core.Plugins
 import cx.desktop.player.Vlc
 import cx.desktop.ui.ActivationScreen
@@ -30,9 +31,19 @@ import cx.desktop.ui.Navigator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-fun main() {
+fun main(args: Array<String>) {
     // Use the proxy configured in Windows (or given with -Dhttps.proxyHost) for every connection.
     if (System.getProperty("https.proxyHost") == null) System.setProperty("java.net.useSystemProxies", "true")
+    if (args.firstOrNull() == "--self-test") {
+        val report = java.io.File(args.getOrElse(1) { "cloudxtream-selftest.txt" })
+        report.writeText("")
+        val ok = runCatching { SelfTest.run(java.io.File(report.parentFile, "selftest-frame.png")) { report.appendText(it + "\n") } }
+            .onFailure { report.appendText("SMOKE crashed: " + Plugins.describe(it) + "\n") }.getOrDefault(false)
+        report.appendText(if (ok) "SELFTEST OK\n" else "SELFTEST FAILED\n")
+        Vlc.release()
+        kotlin.system.exitProcess(if (ok) 0 else 1)
+    }
+    Logs.start()
     System.setProperty("skiko.renderApi", System.getProperty("skiko.renderApi") ?: "DIRECT3D".takeIf { isWindows } ?: "OPENGL")
     application {
         val window = rememberWindowState(width = 1320.dp, height = 820.dp)
