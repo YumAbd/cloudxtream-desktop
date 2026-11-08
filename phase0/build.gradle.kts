@@ -16,6 +16,7 @@ val libraryDependencies = listOf(
     "org.mozilla:rhino:1.8.1",
     "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0",
     "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0",
+    "org.json:json:20260814", // Android ships org.json; extensions use it directly
 )
 
 subprojects {

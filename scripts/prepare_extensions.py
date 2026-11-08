@@ -25,10 +25,26 @@ for repo, entries in sorted(repos.items()):
     target = src_root / repo.replace("/", "__")
     if not target.exists():
         subprocess.run(["git", "clone", "--quiet", "--depth", "1", f"https://github.com/{repo}.git", str(target)], check=False)
-    dirs = {}
-    if target.exists():
+
+    def extension_dirs():
+        found = {}
         for build_file in list(target.glob("*/build.gradle.kts")) + list(target.glob("*/*/build.gradle.kts")):
-            dirs.setdefault(build_file.parent.name.lower(), build_file.parent)
+            found.setdefault(build_file.parent.name.lower(), build_file.parent)
+        return found
+
+    dirs = extension_dirs() if target.exists() else {}
+    wanted = {e["internalName"].lower() for e in entries}
+    if target.exists() and not wanted & dirs.keys():
+        # Some repositories keep the sources on another branch (the default one only has builds).
+        heads = subprocess.run(["git", "-C", str(target), "ls-remote", "--heads", "origin"], capture_output=True, text=True).stdout
+        for branch in sorted({l.split("refs/heads/")[-1] for l in heads.splitlines()}, key=lambda b: (b not in ("master", "main"), b)):
+            if subprocess.run(["git", "-C", str(target), "fetch", "--quiet", "--depth", "1", "origin", branch]).returncode:
+                continue
+            subprocess.run(["git", "-C", str(target), "checkout", "--quiet", "--force", "FETCH_HEAD"], check=False)
+            dirs = extension_dirs()
+            if wanted & dirs.keys():
+                print(f"{repo}: sources on branch {branch}")
+                break
     for entry in entries:
         name = entry["internalName"]
         directory = dirs.get(name.lower())

@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
     inputs:
       providers:
-        description: Catalog extensions to exercise (internal names, space separated)
-        default: Pencurimovie MovieBoxProvider
+        description: Providers to exercise (internal names, space separated, or all = every non-NSFW one)
+        default: all
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ env:
   # Official CloudStream commit the Android app is built from.
   UPSTREAM_SHA: 5024ace2922a148d38df2a816b483b529789cf58
   CATALOG_URL: https://raw.githubusercontent.com/YumAbd/cloudstream-leque/apk-build/sumber.json
-  PROVIDERS: ${{ inputs.providers || 'Pencurimovie MovieBoxProvider' }}
+  PROVIDERS: ${{ inputs.providers || 'all' }}
 
 jobs:
   build:
@@ -50,6 +50,8 @@ jobs:
           VERSION="$(basename "$(dirname "$POM")")"
           echo "CX_LIBRARY=com.lagradost.api:library-jvm:$VERSION" >> "$GITHUB_ENV"
           echo "Library: com.lagradost.api:library-jvm:$VERSION"
+      - name: Catalog extensions as published (.cs3)
+        run: python3 scripts/fetch_cs3.py "$CATALOG_URL" phase0/build/cs3
       - name: Catalog extension sources
         run: python3 scripts/prepare_extensions.py "$CATALOG_URL" phase0/build
       - name: Compile the extensions for desktop Java
@@ -59,18 +61,25 @@ jobs:
           test -x probe/build/install/probe/bin/probe
       - name: Compatibility report
         run: python3 scripts/compat_report.py phase0/build | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Exercise providers from a Linux runner
+      - name: Load the extensions compiled from source
         run: |
-          phase0/probe/build/install/probe/bin/probe phase0/build/ext-jars phase0/build/probe-linux.json phase0/build/links-linux.json $PROVIDERS || true
-          { echo; echo '## Phase 0: provider test on Linux'; echo '```'; cat phase0/build/probe-linux.json | python3 -c "import sys,json;[print(t) for t in json.load(sys.stdin).get('tests',[])]" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          phase0/probe/build/install/probe/bin/probe phase0/build/ext-jars phase0/build/probe-source.json phase0/build/links-source.json || true
+          python3 scripts/probe_summary.py phase0/build/probe-source.json 'Phase 0: extensions compiled from source' >> "$GITHUB_STEP_SUMMARY"
+      - name: Run the published .cs3 extensions on Linux (dex2jar)
+        timeout-minutes: 30
+        run: |
+          phase0/probe/build/install/probe/bin/probe phase0/build/cs3 phase0/build/probe-linux.json phase0/build/links-linux.json $PROVIDERS || true
+          python3 scripts/probe_summary.py phase0/build/probe-linux.json 'Phase 0: published extensions on Linux' | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: phase0-build
           path: |
             phase0/probe/build/install
             phase0/build/ext-jars
+            phase0/build/cs3/*.cs3
             phase0/build/extensions.json
             phase0/build/probe-linux.json
+            phase0/build/probe-source.json
             phase0/build/compat.md
             phase0/build/compile.log
           retention-days: 14
@@ -79,7 +88,7 @@ jobs:
     name: Run on Windows and play a video with libVLC
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
@@ -90,12 +99,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Exercise providers on Windows
+      - name: Run the published .cs3 extensions on Windows (dex2jar)
         shell: bash
+        timeout-minutes: 30
         run: |
-          ls phase0
-          phase0/probe/build/install/probe/bin/probe.bat phase0/build/ext-jars windows.json links-windows.json $PROVIDERS || true
-          { echo '## Phase 0: provider test on Windows'; echo '```'; python -c "import sys,json;[print(t) for t in json.load(open('windows.json')).get('tests',[])]" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          phase0/probe/build/install/probe/bin/probe.bat phase0/build/cs3 windows.json links-windows.json $PROVIDERS || true
+          python scripts/probe_summary.py windows.json 'Phase 0: published extensions on Windows' | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Install VLC
         run: choco install vlc -y --no-progress
       - name: Play the first video link with libVLC

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Windows: records 25 seconds of the first video link with VLC and reports whether video arrived.
+"""Windows: records 25 seconds of the first video links (up to 6) with VLC and reports whether video arrived.
 
 usage: vlc_check.py <links.json> <output dir>
 """
@@ -13,7 +13,7 @@ print("## Phase 0: playback with libVLC on Windows\n")
 if not links:
     print("No video link was found on Windows, so playback could not be tested.")
     sys.exit(0)
-for i, link in enumerate(links):
+for i, link in enumerate(links[:6]):
     sample = out / f"sample{i}.ts"
     args = [vlc, "-I", "dummy", "--play-and-exit", "--run-time=25", link["url"],
             f":sout=#std{{access=file,mux=ts,dst={sample}}}", ":sout-keep"]
