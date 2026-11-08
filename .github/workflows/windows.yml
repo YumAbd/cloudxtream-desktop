@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL -o vlc.zip "https://download.videolan.org/pub/videolan/vlc/${VLC_VERSION}/win64/vlc-${VLC_VERSION}-win64.zip"
-          unzip -q vlc.zip -d vlc-unpacked
+          7z x -y -bso0 vlc.zip -ovlc-unpacked
           src="$(find vlc-unpacked -maxdepth 1 -type d -name 'vlc-*' | head -n 1)"
           dest=app/resources/windows/vlc
           mkdir -p "$dest"
