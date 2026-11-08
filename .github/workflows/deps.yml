@@ -1,0 +1,74 @@
+name: Dependencies - publish the official CloudStream library to the maven branch
+# The app builds against the CloudStream library from the same official commit as the Android app.
+# Building it needs the Android SDK, so it is built here once per upstream commit and published,
+# together with the libraries only available from JitPack, to the "maven" branch of this repository.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/deps.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_SHA: 5024ace2922a148d38df2a816b483b529789cf58
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDK_MANAGER" --licenses > /dev/null || true
+          "$SDK_MANAGER" --install 'platforms;android-37.0'
+      - name: Build the library at the pinned commit
+        run: |
+          set -euo pipefail
+          git clone --quiet --depth 1 https://github.com/recloudstream/cloudstream.git upstream
+          git -C upstream fetch --quiet --depth 1 origin "$UPSTREAM_SHA"
+          git -C upstream checkout --quiet --detach "$UPSTREAM_SHA"
+          (cd upstream && ./gradlew --no-daemon :library:publishToMavenLocal)
+      - name: Collect the library and its JitPack dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p out/com/lagradost
+          cp -r ~/.m2/repository/com/lagradost/api out/com/lagradost/
+          POM="$(find out/com/lagradost/api/library-jvm -name '*.pom' | head -n 1)"
+          echo "library-jvm pom: $POM"; grep -A3 '<dependency>' "$POM" | grep -E 'groupId|artifactId|version' | paste - - - || true
+          # Every dependency of library-jvm that only JitPack serves (com.github.*), with its own dependencies.
+          for dep in $(python3 - "$POM" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+          for d in ET.parse(sys.argv[1]).getroot().iterfind(".//m:dependency", ns):
+              g, a, v = (d.findtext(f"m:{k}", "", ns) for k in ("groupId", "artifactId", "version"))
+              if g.startswith("com.github."):
+                  print(f"{g}:{a}:{v}")
+          PY
+          ); do
+            echo "JitPack: $dep"
+            mvn -q -B -Dmaven.repo.local="$PWD/m2" dependency:get -Dartifact="$dep" \
+              -DremoteRepositories=central::default::https://repo.maven.apache.org/maven2,jitpack::default::https://jitpack.io
+          done
+          [ -d m2/com/github ] && mkdir -p out/com && cp -r m2/com/github out/com/
+          find out -name '_remote.repositories' -delete -o -name '*.lastUpdated' -delete
+          echo "$UPSTREAM_SHA" > out/UPSTREAM_SHA
+          find out -type f | sort
+      - name: Publish to the maven branch
+        run: |
+          set -euo pipefail
+          cd out
+          git init -q -b maven
+          git config user.name YumAbd
+          git config user.email 92353848+YumAbd@users.noreply.github.com
+          git add -A
+          git commit -q -m "CloudStream library at official commit ${UPSTREAM_SHA}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" maven
