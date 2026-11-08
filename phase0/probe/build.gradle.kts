@@ -5,7 +5,7 @@ application {
     mainClass.set("cx.probe.MainKt")
     // Classes converted from Android DEX can refer to Android UI classes that only their settings
     // screens use. Without bytecode verification those references only fail if that code runs.
-    applicationDefaultJvmArgs = listOf("-XX:-BytecodeVerificationRemote", "-Xss4m")
+    applicationDefaultJvmArgs = listOf("-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-Xss4m")
 }
 dependencies {
     "implementation"(project(":stubs"))

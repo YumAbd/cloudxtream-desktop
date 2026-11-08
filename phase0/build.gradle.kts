@@ -17,6 +17,7 @@ val libraryDependencies = listOf(
     "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0",
     "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0",
     "org.json:json:20260814", // Android ships org.json; extensions use it directly
+    "org.jspecify:jspecify:1.0.0", // nullness annotations seen through OkHttp 5 types
 )
 
 subprojects {
