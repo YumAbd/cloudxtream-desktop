@@ -43,6 +43,19 @@ jobs:
           # Not used by an embedded player.
           rm -rf "$dest/plugins/gui" "$dest/plugins/visualization" "$dest/plugins/lua" "$dest/plugins/control" "$dest/plugins/services_discovery"
           du -sh "$dest"
+      - name: WiX cache (MSI builder used by the packaging)
+        id: wix
+        uses: actions/cache@v5
+        with:
+          path: build/wix311.zip
+          key: wix3112rtm
+      - name: WiX download with retries
+        if: steps.wix.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p build
+          curl -fsSL --retry 8 --retry-all-errors --retry-delay 10 -o build/wix311.zip \
+            https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip
       - name: Version
         id: version
         shell: bash
@@ -56,7 +69,7 @@ jobs:
           fi
       - name: Build the installers
         shell: bash
-        run: gradle --no-daemon -PappVersion=${{ steps.version.outputs.version }} :app:createDistributable :app:packageMsi :app:packageExe
+        run: gradle --no-daemon -PappVersion=${{ steps.version.outputs.version }} :app:createDistributable :app:packageMsi :app:packageExe -x downloadWix
       - name: Self test of the packaged app (bundled Java runtime and VLC)
         shell: bash
         run: |
