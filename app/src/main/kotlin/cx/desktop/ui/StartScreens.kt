@@ -68,7 +68,7 @@ fun LoadingScreen(text: String, fraction: Float?) = Centered {
 @Composable
 fun BlockedScreen(message: String, retry: () -> Unit) = Centered {
     Text(message, color = Palette.text, textAlign = TextAlign.Center)
-    Button(onClick = retry) { Text("Cuba lagi") }
+    Button(onClick = retry) { Text(tr("Cuba lagi", "Try again")) }
 }
 
 @Composable
@@ -96,12 +96,12 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
     }
 
     Centered {
-        Text("Masukkan PIN pengaktifan daripada admin CloudXtream.", color = Palette.muted, textAlign = TextAlign.Center)
+        Text(tr("Masukkan PIN pengaktifan daripada admin CloudXtream.", "Enter the activation PIN from the CloudXtream admin."), color = Palette.muted, textAlign = TextAlign.Center)
         OutlinedTextField(
             value = pin,
             onValueChange = { value -> pin = value.filter { it.isLetterOrDigit() }.uppercase().take(16) },
             singleLine = true,
-            label = { Text("PIN (6 aksara)") },
+            label = { Text(tr("PIN (6 aksara)", "PIN (6 characters)")) },
             enabled = !busy,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { activate() }),
@@ -109,19 +109,22 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 22.sp, letterSpacing = 6.sp, color = Palette.text),
         )
         Button(onClick = { activate() }, enabled = !busy && (pin.length == 6 || pin.length == 16), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Aktifkan")
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(tr("Aktifkan", "Activate"))
         }
         message?.let { Text(it, color = Palette.error, textAlign = TextAlign.Center) }
+        androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Lang.choices.forEach { (code, label) -> Pill(label, Lang.code == code) { Lang.set(code) } }
+        }
     }
 
     if (replaceChoices.isNotEmpty()) {
         val format = SimpleDateFormat("d MMM yyyy, HH:mm")
         AlertDialog(
             onDismissRequest = { replaceChoices = emptyList() },
-            title = { Text("Had peranti penuh") },
+            title = { Text(tr("Had peranti penuh", "Device limit reached")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Pilih peranti lama yang akan digantikan dengan PC ini. Peranti itu tidak lagi boleh digunakan.", color = Palette.muted)
+                    Text(tr("Pilih peranti lama yang akan digantikan dengan PC ini. Peranti itu tidak lagi boleh digunakan.", "Choose the old device this PC replaces. That device will no longer work."), color = Palette.muted)
                     Spacer(Modifier.height(4.dp))
                     replaceChoices.forEach { device ->
                         Column(
@@ -129,13 +132,13 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
                                 .clickable { replaceChoices = emptyList(); activate(device.id) }.padding(12.dp)
                         ) {
                             Text(device.label, color = Palette.text, fontWeight = FontWeight.SemiBold)
-                            if (device.lastSeenMs > 0) Text("Terakhir digunakan: " + format.format(Date(device.lastSeenMs)), color = Palette.muted, fontSize = 12.sp)
+                            if (device.lastSeenMs > 0) Text(tr("Terakhir digunakan: ", "Last used: ") + format.format(Date(device.lastSeenMs)), color = Palette.muted, fontSize = 12.sp)
                         }
                     }
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { replaceChoices = emptyList() }) { Text("Batal") } },
+            dismissButton = { TextButton(onClick = { replaceChoices = emptyList() }) { Text(tr("Batal", "Cancel")) } },
         )
     }
 }

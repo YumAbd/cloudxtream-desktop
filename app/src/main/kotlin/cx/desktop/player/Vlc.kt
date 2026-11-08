@@ -78,18 +78,22 @@ class VideoPlayer {
     var failed by mutableStateOf(false)
         private set
 
+    /** Guards the frame memory: VLC writes it on its thread, Compose reads it while drawing. */
+    val frameLock = Any()
     private var bitmap: Bitmap? = null
-    private var info: ImageInfo? = null
-    private var bytes = ByteArray(0)
+    private var pixels = 0L
+    private var frameBytes = 0L
 
     private val formatCallback = object : BufferFormatCallback {
         override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
-            val i = ImageInfo(sourceWidth, sourceHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-            val b = Bitmap().apply { allocPixels(i) }
-            info = i
-            bitmap = b
-            bytes = ByteArray(sourceWidth * sourceHeight * 4)
-            frame = b.asComposeImageBitmap()
+            synchronized(frameLock) {
+                val i = ImageInfo(sourceWidth, sourceHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+                val b = Bitmap().apply { allocPixels(i) }
+                bitmap = b
+                pixels = b.peekPixels()?.addr ?: 0L
+                frameBytes = sourceWidth.toLong() * sourceHeight * 4
+                frame = b.asComposeImageBitmap()
+            }
             return RV32BufferFormat(sourceWidth, sourceHeight)
         }
         override fun newFormatSize(bufferWidth: Int, bufferHeight: Int, displayWidth: Int, displayHeight: Int) {}
@@ -100,13 +104,16 @@ class VideoPlayer {
         override fun lock(mediaPlayer: MediaPlayer) {}
         override fun unlock(mediaPlayer: MediaPlayer) {}
         override fun display(mediaPlayer: MediaPlayer, nativeBuffers: Array<out ByteBuffer>, bufferFormat: BufferFormat, displayWidth: Int, displayHeight: Int) {
-            val b = bitmap ?: return
-            val i = info ?: return
-            val buffer = nativeBuffers[0]
-            buffer.rewind()
-            if (buffer.remaining() < bytes.size) return
-            buffer.get(bytes)
-            b.installPixels(i, bytes, i.width * 4)
+            synchronized(frameLock) {
+                val b = bitmap ?: return
+                val buffer = nativeBuffers.firstOrNull() ?: return
+                if (pixels == 0L || buffer.capacity() < frameBytes) return
+                // Native copy into the bitmap's own memory: no allocation per frame, and never while
+                // Compose is drawing (same lock).
+                val source = com.sun.jna.Pointer.nativeValue(com.sun.jna.Native.getDirectBufferPointer(buffer))
+                Memory.copy(source, pixels, frameBytes)
+                b.notifyPixelsChanged()
+            }
             frameCount++
         }
     }
@@ -137,12 +144,12 @@ class VideoPlayer {
         timeMs = startMs
         lengthMs = 0
         val lower = headers.mapKeys { it.key.lowercase() }
-        // Sources that need more headers than VLC can send are played through the local proxy.
         val all = buildMap {
             putAll(headers)
             referer?.takeIf { it.isNotBlank() }?.let { if (keys.none { k -> k.equals("referer", true) }) put("Referer", it) }
         }
-        val mrl = if (HeaderProxy.needed(all)) HeaderProxy.wrap(url, all) else url
+        // Network streams go through the local proxy (DNS over HTTPS and every header); files play directly.
+        val mrl = if (url.startsWith("http://") || url.startsWith("https://")) HeaderProxy.wrap(url, all) else url
         val options = buildList {
             add(":network-caching=${cx.desktop.core.Prefs.networkCachingMs}")
             add(":file-caching=1000")
@@ -153,8 +160,9 @@ class VideoPlayer {
         player.submit { player.media().play(mrl, *options.toTypedArray()) }
     }
 
-    fun addSubtitle(url: String) {
-        player.submit { player.subpictures().setSubTitleUri(url) }
+    fun addSubtitle(url: String, headers: Map<String, String>? = null) {
+        val mrl = if (url.startsWith("http")) HeaderProxy.wrap(url, headers.orEmpty()) else url
+        player.submit { player.subpictures().setSubTitleUri(mrl) }
     }
 
     fun disableSubtitles() {
@@ -178,7 +186,7 @@ class VideoPlayer {
         set(value) { player.submit { player.audio().setVolume(value.coerceIn(0, 150)) } }
 
     /** The current video frame as PNG (for tests and diagnostics). */
-    fun snapshotPng(): ByteArray? = bitmap?.let { org.jetbrains.skia.Image.makeFromBitmap(it).encodeToData()?.bytes }
+    fun snapshotPng(): ByteArray? = synchronized(frameLock) { bitmap?.let { org.jetbrains.skia.Image.makeFromBitmap(it).encodeToData()?.bytes } }
 
     fun stop() {
         player.submit { player.controls().stop() }
@@ -189,4 +197,11 @@ class VideoPlayer {
         runCatching { player.controls().stop() }
         runCatching { player.release() }
     }
+}
+
+/** Native memory copy (sun.misc.Unsafe, in the bundled jdk.unsupported module). */
+private object Memory {
+    private val unsafe: sun.misc.Unsafe = sun.misc.Unsafe::class.java.getDeclaredField("theUnsafe")
+        .apply { isAccessible = true }.get(null) as sun.misc.Unsafe
+    fun copy(from: Long, to: Long, bytes: Long) = unsafe.copyMemory(from, to, bytes)
 }

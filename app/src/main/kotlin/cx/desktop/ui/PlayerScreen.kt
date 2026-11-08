@@ -82,8 +82,8 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     if (!Vlc.available) {
         Box(Modifier.fillMaxSize().background(Palette.background), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("VLC tidak dijumpai, jadi video tidak dapat dimainkan. Pasang semula CloudXtream.", color = Palette.text)
-                Button(onClick = onBack) { Text("Kembali") }
+                Text(tr("VLC tidak dijumpai, jadi video tidak dapat dimainkan. Pasang semula CloudXtream.", "VLC was not found, so video cannot play. Reinstall CloudXtream."), color = Palette.text)
+                Button(onClick = onBack) { Text(tr("Kembali", "Back")) }
             }
         }
         return
@@ -99,6 +99,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     var panel by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var localPlaying by remember { mutableStateOf(false) }
+    var linkError by remember { mutableStateOf<String?>(null) }
     val tried = remember { mutableSetOf<String>() }
     val focus = remember { FocusRequester() }
     val seekMs = cx.desktop.core.Prefs.seekSeconds * 1000L
@@ -114,7 +115,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
         current = link
         tried += link.url
         player.play(link.url, link.referer, link.headers, at)
-        subtitle?.let { player.addSubtitle(it.url) }
+        subtitle?.let { player.addSubtitle(it.url, it.headers) }
     }
 
     fun save() {
@@ -152,8 +153,8 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                         { s -> scope.launch { if (subtitles.none { it.url == s.url }) subtitles.add(s) } },
                         { l -> scope.launch { if (l.type != ExtractorLinkType.TORRENT && l.type != ExtractorLinkType.MAGNET && links.none { it.url == l.url }) links.add(l) } })
                 }
-            }
-        }
+            }.onFailure { linkError = Plugins.describe(it) }
+        } ?: run { linkError = tr("tamat masa", "timed out") }
         loadingLinks = false
     }
     LaunchedEffect(links.size) {
@@ -181,7 +182,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
             }
             if (pick != null) {
                 subtitle = pick
-                if (current != null) player.addSubtitle(pick.url)
+                if (current != null) player.addSubtitle(pick.url, pick.headers)
             }
         }
     }
@@ -190,10 +191,10 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
         if (player.failed) {
             val next = links.sortedByDescending { it.quality }.firstOrNull { it.url !in tried }
             if (next != null) {
-                notice = "Sumber gagal, mencuba ${next.label()}…"
+                notice = tr("Sumber gagal, mencuba ", "Source failed, trying ") + next.label() + "…"
                 start(next, player.timeMs)
             } else {
-                notice = "Semua sumber gagal dimainkan."
+                notice = tr("Semua sumber gagal dimainkan.", "No source could be played.")
             }
         }
     }
@@ -242,7 +243,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
         val image = player.frame
         Canvas(Modifier.fillMaxSize().clickable(indication = null, interactionSource = null) { player.togglePause() }) {
             player.frameCount // redraw on each decoded frame
-            if (image != null && image.width > 0) {
+            if (image != null && image.width > 0) synchronized(player.frameLock) {
                 val scale = min(size.width / image.width, size.height / image.height)
                 val w = image.width * scale
                 val h = image.height * scale
@@ -257,13 +258,13 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                 if (current != null || loadingLinks || localPlaying) CircularProgressIndicator()
                 Text(
                     when {
-                        current != null || localPlaying -> "Memuatkan video…"
-                        loadingLinks -> "Mencari sumber video… (${links.size} dijumpai)"
-                        else -> "Tiada sumber video dijumpai untuk tajuk ini."
+                        current != null || localPlaying -> tr("Memuatkan video…", "Loading video…")
+                        loadingLinks -> tr("Mencari sumber video… (${links.size} dijumpai)", "Finding video sources… (${links.size} found)")
+                        else -> tr("Tiada sumber video dijumpai untuk tajuk ini.", "No video source was found for this title.") + (linkError?.let { " ($it)" } ?: "")
                     },
                     color = Color.White,
                 )
-                if (current == null && !loadingLinks && !localPlaying) Button(onClick = onBack) { Text("Kembali") }
+                if (current == null && !loadingLinks && !localPlaying) Button(onClick = onBack) { Text(tr("Kembali", "Back")) }
             }
         }
         if (controlsVisible || !player.playing) {
@@ -272,7 +273,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                 Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                TextButton(onClick = onBack) { Text("← Kembali", color = Color.White) }
+                TextButton(onClick = onBack) { Text(tr("← Kembali", "← Back"), color = Color.White) }
                 Column(Modifier.weight(1f)) {
                     Text(request.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                     request.episodeLabel?.let { Text(it, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp) }
@@ -293,7 +294,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                     colors = SliderDefaults.colors(thumbColor = Palette.primary, activeTrackColor = Palette.primary),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { player.togglePause() }) { Text(if (player.playing) "❚❚ Jeda" else "▶ Main", color = Color.White) }
+                    TextButton(onClick = { player.togglePause() }) { Text(if (player.playing) tr("❚❚ Jeda", "❚❚ Pause") else tr("▶ Main", "▶ Play"), color = Color.White) }
                     TextButton(onClick = { player.seekBy(-seekMs) }) { Text("⟲ ${seekMs / 1000}s", color = Color.White) }
                     TextButton(onClick = { player.seekBy(seekMs) }) { Text("${seekMs / 1000}s ⟳", color = Color.White) }
                     Text("${formatTime(player.timeMs)} / ${formatTime(player.lengthMs)}", color = Color.White, fontSize = 13.sp)
@@ -302,15 +303,15 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                         save()
                         val (data, label) = request.next.first()
                         onPlayNext(request.copy(episodeData = data, episodeLabel = label, startMs = 0, next = request.next.drop(1)))
-                    }) { Text("Episod seterusnya ⏭", color = Color.White) }
+                    }) { Text(tr("Episod seterusnya ⏭", "Next episode ⏭"), color = Color.White) }
                     TextButton(onClick = { panel = if (panel == "sources") null else "sources" }) {
-                        Text("Sumber (${links.size})", color = Color.White)
+                        Text(tr("Sumber", "Sources") + " (${links.size})", color = Color.White)
                     }
                     TextButton(onClick = { panel = if (panel == "subs") null else "subs" }) {
-                        Text("Sarikata (${subtitles.size})", color = Color.White)
+                        Text(tr("Sarikata", "Subtitles") + " (${subtitles.size})", color = Color.White)
                     }
-                    TextButton(onClick = { panel = if (panel == "report") null else "report" }) { Text("Lapor", color = Color.White) }
-                    TextButton(onClick = { AppWindow.toggleFullscreen() }) { Text("⛶ Skrin penuh", color = Color.White) }
+                    TextButton(onClick = { panel = if (panel == "report") null else "report" }) { Text(tr("Lapor", "Report"), color = Color.White) }
+                    TextButton(onClick = { AppWindow.toggleFullscreen() }) { Text(tr("⛶ Skrin penuh", "⛶ Full screen"), color = Color.White) }
                 }
             }
         }
@@ -322,7 +323,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
             ) {
                 when (which) {
                     "sources" -> {
-                        Text("Pilih sumber video", color = Palette.text, fontWeight = FontWeight.SemiBold)
+                        Text(tr("Pilih sumber video", "Choose a video source"), color = Palette.text, fontWeight = FontWeight.SemiBold)
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(links.sortedByDescending { it.quality }) { link ->
                                 Row(
@@ -335,33 +336,33 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                                         modifier = Modifier.clickable {
                                             cx.desktop.core.Downloads.start(request.title, request.episodeLabel, request.poster, link.url, link.referer, link.headers,
                                                 hls = link.type == ExtractorLinkType.M3U8)
-                                            notice = "Muat turun bermula: lihat menu Muat turun."
+                                            notice = tr("Muat turun bermula: lihat menu Muat turun.", "Download started: see Downloads.")
                                         }.padding(horizontal = 6.dp))
                                 }
                             }
                         }
                     }
                     "subs" -> {
-                        Text("Sarikata", color = Palette.text, fontWeight = FontWeight.SemiBold)
+                        Text(tr("Sarikata", "Subtitles"), color = Palette.text, fontWeight = FontWeight.SemiBold)
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             item {
                                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                     .background(if (subtitle == null) Palette.primary else Palette.surfaceHigh)
                                     .clickable { subtitle = null; player.disableSubtitles(); panel = null }.padding(10.dp)) {
-                                    Text("Tiada", color = Palette.text, fontSize = 13.sp)
+                                    Text(tr("Tiada", "Off"), color = Palette.text, fontSize = 13.sp)
                                 }
                             }
                             items(subtitles.toList()) { s ->
                                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                     .background(if (s == subtitle) Palette.primary else Palette.surfaceHigh)
-                                    .clickable { subtitle = s; player.addSubtitle(s.url); panel = null }.padding(10.dp)) {
+                                    .clickable { subtitle = s; player.addSubtitle(s.url, s.headers); panel = null }.padding(10.dp)) {
                                     Text(s.lang, color = Palette.text, fontSize = 13.sp)
                                 }
                             }
                         }
                     }
                     "report" -> {
-                        Text("Laporkan masalah video ini kepada admin CloudXtream?", color = Palette.text)
+                        Text(tr("Laporkan masalah video ini kepada admin CloudXtream?", "Report a problem with this video to the CloudXtream admin?"), color = Palette.text)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
                                 panel = null
@@ -372,10 +373,10 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                                         "Windows · " + (current?.label() ?: "tiada sumber") + " · ${links.size} sumber",
                                         "win-" + AppInfo.version,
                                     )
-                                    notice = if (ok) "Laporan dihantar. Terima kasih!" else "Laporan gagal dihantar."
+                                    notice = if (ok) tr("Laporan dihantar. Terima kasih!", "Report sent. Thank you!") else tr("Laporan gagal dihantar.", "The report could not be sent.")
                                 }
-                            }) { Text("Hantar laporan") }
-                            TextButton(onClick = { panel = null }) { Text("Batal") }
+                            }) { Text(tr("Hantar laporan", "Send report")) }
+                            TextButton(onClick = { panel = null }) { Text(tr("Batal", "Cancel")) }
                         }
                     }
                 }

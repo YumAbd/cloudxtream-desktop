@@ -84,6 +84,7 @@ tasks.register<JavaExec>("devPreview") {
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set("cx.desktop.DevPreviewKt")
     jvmArgs("-XX:+UnlockDiagnosticVMOptions", "-XX:-BytecodeVerificationRemote", "-Xss4m")
+    (findProperty("shots") as String?)?.let { args("--shots", it) }
 }
 
 // CI smoke test (src/test): extensions + bundled libVLC decode a real video. Args: output PNG.

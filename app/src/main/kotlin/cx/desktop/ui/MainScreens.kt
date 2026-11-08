@@ -29,6 +29,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
@@ -55,6 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lagradost.cloudstream3.HomePageList
+import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.MainPageRequest
 import com.lagradost.cloudstream3.SearchResponse
@@ -108,7 +114,7 @@ fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
             }
             UpdateBanner()
             if (navigator.stack.size > 1) {
-                TextButton(onClick = { navigator.back() }, modifier = Modifier.padding(start = 12.dp, top = 8.dp)) { Text("← Kembali") }
+                TextButton(onClick = { navigator.back() }, modifier = Modifier.padding(start = 12.dp, top = 8.dp)) { Text(tr("← Kembali", "← Back")) }
             }
             Box(Modifier.weight(1f)) {
                 when (screen) {
@@ -137,15 +143,15 @@ private fun NavRail(navigator: Navigator, account: AccountInfo) {
     ) {
         Image(painterResource("icon.png"), null, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable { navigator.home() })
         Spacer(Modifier.height(14.dp))
-        RailItem(Icons.Filled.Home, "Utama", root == Screen.Home) { navigator.root(Screen.Home) }
-        RailItem(Icons.Filled.Search, "Cari", root is Screen.Search) { navigator.root(Screen.Search()) }
-        RailItem(Icons.Filled.VideoLibrary, "Pustaka", root == Screen.Library) { navigator.root(Screen.Library) }
-        RailItem(Icons.Filled.Download, "Muat turun", root == Screen.Downloads) { navigator.root(Screen.Downloads) }
-        RailItem(Icons.Filled.Settings, "Tetapan", root is Screen.Settings && (root as Screen.Settings).section != "account") {
+        RailItem(Icons.Filled.Home, tr("Utama", "Home"), root == Screen.Home) { navigator.root(Screen.Home) }
+        RailItem(Icons.Filled.Search, tr("Cari", "Search"), root is Screen.Search) { navigator.root(Screen.Search()) }
+        RailItem(Icons.Filled.VideoLibrary, tr("Pustaka", "Library"), root == Screen.Library) { navigator.root(Screen.Library) }
+        RailItem(Icons.Filled.Download, tr("Muat turun", "Downloads"), root == Screen.Downloads) { navigator.root(Screen.Downloads) }
+        RailItem(Icons.Filled.Settings, tr("Tetapan", "Settings"), root is Screen.Settings && (root as Screen.Settings).section != "account") {
             navigator.root(Screen.Settings())
         }
         Spacer(Modifier.weight(1f))
-        RailItem(Icons.Filled.AccountCircle, account.displayName.ifBlank { "Akaun" }, (root as? Screen.Settings)?.section == "account") {
+        RailItem(Icons.Filled.AccountCircle, account.displayName.ifBlank { tr("Akaun", "Account") }, (root as? Screen.Settings)?.section == "account") {
             navigator.root(Screen.Settings("account"))
         }
     }
@@ -170,11 +176,12 @@ private fun RailItem(icon: ImageVector, label: String, selected: Boolean, onClic
 /** Home rows are kept per provider so Back does not reload them. */
 private object HomeCache {
     val rows = mutableMapOf<String, List<HomePageList>>()
+    val details = java.util.concurrent.ConcurrentHashMap<String, LoadResponse>()
 }
 
 @Composable
 private fun HomeScreen(navigator: Navigator) {
-    val providers = remember { visibleProviders().filter { it.hasMainPage && it.mainPage.isNotEmpty() } }
+    val providers = remember(Lang.code) { visibleProviders().filter { it.hasMainPage && it.mainPage.isNotEmpty() } }
     var selected by remember { mutableStateOf<MainAPI?>(null) }
     LaunchedEffect(Unit) {
         val chosen = Settings.string("home_provider")?.let { name -> providers.firstOrNull { it.name == name } }
@@ -207,16 +214,21 @@ private fun HomeScreen(navigator: Navigator) {
         loading = false
     }
 
-    val history = remember { History.all() }
-    LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
+    var history by remember { mutableStateOf(History.all()) }
+    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
         item {
-            ProviderPicker(providers, api) {
-                selected = it
-                Settings.set("home_provider", it.name)
+            val featured = rows.firstOrNull()?.list?.take(6).orEmpty()
+            if (api != null && featured.isNotEmpty()) {
+                Hero(api, featured, navigator) { ProviderPicker(providers, api) { selected = it; Settings.set("home_provider", it.name) } }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, top = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(tr("Utama", "Home"), color = Palette.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    ProviderPicker(providers, api) { selected = it; Settings.set("home_provider", it.name) }
+                }
             }
         }
         if (Prefs.showContinueWatching && history.isNotEmpty()) item {
-            CardRow("Teruskan menonton", history.take(20).mapNotNull { entry ->
+            CardRow(tr("Teruskan menonton", "Continue watching"), history.take(20).mapNotNull { entry ->
                 val provider = Plugins.provider(entry.provider) ?: return@mapNotNull null
                 CardItem(
                     title = entry.title,
@@ -224,6 +236,7 @@ private fun HomeScreen(navigator: Navigator) {
                     headers = null,
                     subtitle = listOfNotNull(entry.episodeLabel, provider.name).joinToString(" · "),
                     progress = if (entry.durationMs > 0) entry.positionMs.toFloat() / entry.durationMs else null,
+                    onRemove = { History.remove(entry.provider, entry.url); history = History.all() },
                 ) { navigator.open(Screen.Details(provider, entry.url, entry.title, entry.poster)) }
             })
         }
@@ -231,33 +244,104 @@ private fun HomeScreen(navigator: Navigator) {
             CardRow(row.name, row.list.map { it.toCard(navigator, api!!) }, row.isHorizontalImages)
         }
         if (loading && rows.isEmpty()) item {
-            Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxWidth().padding(60.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
         if (!loading && rows.isEmpty()) item {
             Text(
-                if (api == null) "Tiada sumber. Semak Tetapan → Kemas kini → Extension."
-                else "Tiada kandungan daripada ${api.name}" + (failed?.let { " ($it)" } ?: "") + ". Cuba sumber lain.",
-                color = Palette.muted, modifier = Modifier.padding(horizontal = 24.dp),
+                if (api == null) tr("Tiada sumber. Semak Tetapan → Kemas kini → Extension.", "No sources. Check Settings → Updates → Extensions.")
+                else tr("Tiada kandungan daripada ${api.name}", "Nothing from ${api.name}") + (failed?.let { " ($it)" } ?: "") +
+                    tr(". Cuba sumber lain.", ". Try another source."),
+                color = Palette.muted, modifier = Modifier.padding(horizontal = 32.dp),
             )
         }
     }
+}
+
+/** Large banner at the top of Home, rotating through the first titles of the provider. */
+@Composable
+private fun Hero(api: MainAPI, items: List<SearchResponse>, navigator: Navigator, picker: @Composable () -> Unit) {
+    var index by remember(items) { mutableStateOf(0) }
+    LaunchedEffect(items) {
+        while (true) {
+            kotlinx.coroutines.delay(9_000)
+            index = (index + 1) % items.size
+        }
+    }
+    val item = items[index.coerceIn(0, items.lastIndex)]
+    var details by remember(item.url) { mutableStateOf(HomeCache.details[item.url]) }
+    LaunchedEffect(item.url) {
+        if (details == null) runCatching {
+            withTimeoutOrNull(20_000) { withContext(Dispatchers.IO) { api.load(item.url) } }
+        }.getOrNull()?.let { HomeCache.details[item.url] = it; details = it }
+    }
+    val d = details
+    Box(Modifier.fillMaxWidth().height(470.dp)) {
+        RemoteImage(d?.backgroundPosterUrl ?: d?.posterUrl ?: item.posterUrl, d?.posterHeaders ?: item.posterHeaders, Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Palette.background, 0.55f to Palette.background.copy(alpha = 0.55f), 1f to Color.Transparent)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Palette.background)))
+        Box(Modifier.align(Alignment.TopEnd).padding(20.dp)) { picker() }
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(start = 32.dp, bottom = 30.dp).width(620.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(api.name.uppercase(), color = Palette.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text(d?.name ?: item.name, color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 42.sp)
+            val meta = listOfNotNull(
+                d?.year?.toString(), d?.score?.toStringNull(0.1, 10, 1)?.let { "★ $it" }, (d?.type ?: item.type)?.let { typeLabel(it.name) },
+                d?.duration?.let { "$it min" }, item.quality?.name,
+            )
+            if (meta.isNotEmpty()) Text(meta.joinToString("   •   "), color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
+            d?.plot?.let { Text(it, color = Color.White.copy(alpha = 0.8f), maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, lineHeight = 20.sp) }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) {
+                    Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text(tr("Tonton", "Play"), fontWeight = FontWeight.Bold)
+                }
+                androidx.compose.material3.Button(onClick = {
+                    Library.update(cx.desktop.core.LibraryEntry(api.name, item.url, item.name, item.posterUrl)) { it.copy(status = it.status ?: WatchStatus.PLAN) }
+                }, colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
+                    Icon(Icons.Filled.Add, null); Spacer(Modifier.width(6.dp)); Text(tr("Senarai saya", "My list"))
+                }
+                androidx.compose.material3.Button(onClick = { navigator.open(Screen.Details(api, item.url, item.name, item.posterUrl)) },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.2f), contentColor = Color.White)) {
+                    Icon(Icons.Filled.Info, null); Spacer(Modifier.width(6.dp)); Text(tr("Maklumat", "More info"))
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items.indices.forEach { i ->
+                    Box(Modifier.size(if (i == index) 22.dp else 8.dp, 4.dp).clip(RoundedCornerShape(2.dp))
+                        .background(if (i == index) Color.White else Color.White.copy(alpha = 0.35f)).clickable { index = i })
+                }
+            }
+        }
+    }
+}
+
+fun typeLabel(type: String): String = when (type) {
+    "Movie", "AnimeMovie" -> tr("Filem", "Movie")
+    "TvSeries" -> tr("Siri TV", "TV series")
+    "Anime", "OVA" -> "Anime"
+    "AsianDrama" -> tr("Drama Asia", "Asian drama")
+    "Cartoon" -> tr("Kartun", "Cartoon")
+    "Documentary" -> tr("Dokumentari", "Documentary")
+    "Live" -> tr("Siaran langsung", "Live")
+    else -> type
 }
 
 fun SearchResponse.toCard(navigator: Navigator, api: MainAPI) = CardItem(
     title = name,
     poster = posterUrl,
     headers = posterHeaders,
-    subtitle = quality?.name,
+    subtitle = type?.let { typeLabel(it.name) },
+    badge = quality?.name?.takeIf { it.isNotBlank() && it != "Unknown" },
 ) { navigator.open(Screen.Details(api, url, name, posterUrl)) }
 
 @Composable
 private fun ProviderPicker(providers: List<MainAPI>, selected: MainAPI?, onSelect: (MainAPI) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Sumber:", color = Palette.muted)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box {
-            Pill((selected?.name ?: "Pilih sumber") + "  ▾", true) { open = true }
+            Pill(tr("Sumber: ", "Source: ") + (selected?.name ?: tr("pilih", "choose")) + "  ▾", true) { open = true }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 providers.forEach { api ->
                     DropdownMenuItem(text = { Text(api.name) }, onClick = { open = false; onSelect(api) })
@@ -293,21 +377,32 @@ private fun SearchScreen(navigator: Navigator, initial: String) {
     }
     LazyColumn(contentPadding = PaddingValues(vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(26.dp)) {
         item {
-            Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.padding(start = 32.dp, end = 32.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    placeholder = { Text("Cari filem, siri, anime di semua sumber…") },
+                    placeholder = { Text(tr("Cari filem, siri, anime di semua sumber…", "Search movies, series, anime in every source…")) },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) navigator.replace(Screen.Search(query.trim())) }),
-                    modifier = Modifier.width(560.dp).focusRequester(focus),
+                    keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) { rememberSearch(query.trim()); navigator.replace(Screen.Search(query.trim())) } }),
+                    modifier = Modifier.width(620.dp).focusRequester(focus),
+                    shape = RoundedCornerShape(28.dp),
                 )
                 if (pending > 0) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("$pending sumber lagi…", color = Palette.muted, fontSize = 13.sp)
+                    Text(tr("$pending sumber lagi…", "$pending sources left…"), color = Palette.muted, fontSize = 13.sp)
+                }
+            }
+        }
+        if (initial.isBlank()) item {
+            val recent = recentSearches()
+            if (recent.isNotEmpty()) Column(Modifier.padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(tr("Carian terkini", "Recent searches"), color = Palette.muted, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    recent.forEach { q -> Pill(q, false) { navigator.replace(Screen.Search(q)) } }
+                    Pill("✕ " + tr("Kosongkan", "Clear"), false) { Settings.set("recent_searches", null); navigator.replace(Screen.Search()) }
                 }
             }
         }
@@ -315,16 +410,17 @@ private fun SearchScreen(navigator: Navigator, initial: String) {
             CardRow(api.name, list.map { it.toCard(navigator, api) })
         }
         if (initial.isNotBlank() && pending == 0 && results.isEmpty()) item {
-            Text("Tiada hasil untuk “$initial”.", color = Palette.muted, modifier = Modifier.padding(horizontal = 24.dp))
+            Text(tr("Tiada hasil untuk “$initial”.", "No results for “$initial”."), color = Palette.muted, modifier = Modifier.padding(horizontal = 32.dp))
         }
     }
 }
 
 @Composable
 private fun LibraryScreen(navigator: Navigator) {
-    val tabs = WatchStatus.entries.map { it.label to it.name } + listOf("Kegemaran" to "fav", "Langganan" to "sub")
+    val tabs = WatchStatus.entries.map { statusLabel(it) to it.name } + listOf(tr("Kegemaran", "Favourites") to "fav", tr("Langganan", "Subscribed") to "sub")
     var tab by remember { mutableStateOf(Settings.string("library_tab") ?: WatchStatus.WATCHING.name) }
-    val entries = remember(tab) {
+    var refresh by remember { mutableStateOf(0) }
+    val entries = remember(tab, refresh) {
         Library.all().filter {
             when (tab) {
                 "fav" -> it.favourite
@@ -334,12 +430,12 @@ private fun LibraryScreen(navigator: Navigator) {
         }
     }
     Column(Modifier.fillMaxSize().padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        Text("Pustaka", color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 24.dp))
+        Text(tr("Pustaka", "Library"), color = Palette.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 24.dp))
         Row(Modifier.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             tabs.forEach { (label, id) -> Pill(label, id == tab) { tab = id; Settings.set("library_tab", id) } }
         }
         if (entries.isEmpty()) {
-            Text("Tiada tajuk dalam senarai ini. Tambah dari halaman butiran tajuk.", color = Palette.muted, modifier = Modifier.padding(horizontal = 24.dp))
+            Text(tr("Tiada tajuk dalam senarai ini. Tambah dari halaman butiran tajuk.", "Nothing here yet. Add titles from their details page."), color = Palette.muted, modifier = Modifier.padding(horizontal = 24.dp))
         }
         LazyVerticalGrid(
             GridCells.Adaptive(posterWidth() + 14.dp),
@@ -349,7 +445,10 @@ private fun LibraryScreen(navigator: Navigator) {
         ) {
             items(entries) { e ->
                 val provider = Plugins.provider(e.provider)
-                PosterCard(CardItem(e.title, e.poster, null, provider?.name ?: "${e.provider} (tiada)") {
+                PosterCard(CardItem(e.title, e.poster, null, provider?.name ?: "${e.provider} (${tr("tiada", "missing")})", onRemove = {
+                    Library.update(e) { it.copy(status = if (tab in setOf("fav", "sub")) it.status else null, favourite = if (tab == "fav") false else it.favourite, subscribed = if (tab == "sub") false else it.subscribed) }
+                    refresh++
+                }) {
                     if (provider != null) navigator.open(Screen.Details(provider, e.url, e.title, e.poster))
                 })
             }
@@ -362,12 +461,12 @@ private fun DownloadsScreen(navigator: Navigator) {
     val items = Downloads.items
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Muat turun", color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(tr("Muat turun", "Downloads"), color = Palette.text, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text(Prefs.downloadDir.absolutePath, color = Palette.muted, fontSize = 12.sp)
-            TextButton(onClick = { openFolder(Prefs.downloadDir) }) { Text("Buka folder") }
+            TextButton(onClick = { openFolder(Prefs.downloadDir) }) { Text(tr("Buka folder", "Open folder")) }
         }
         if (items.isEmpty()) {
-            Text("Belum ada muat turun. Pilih \"Muat turun\" pada sumber video dalam pemain atau halaman butiran.", color = Palette.muted)
+            Text(tr("Belum ada muat turun. Tekan ⬇ pada filem atau episod di halaman butiran.", "No downloads yet. Press ⬇ on a movie or episode in its details page."), color = Palette.muted)
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(items.toList(), key = { it.id }) { d -> DownloadRow(d, navigator) }
@@ -387,11 +486,11 @@ private fun DownloadRow(d: Download, navigator: Navigator) {
             val size = "%.1f MB".format(d.bytes / 1_048_576.0)
             Text(
                 when (d.state) {
-                    "running" -> "Memuat turun… ${(d.progress * 100).toInt()}% · $size"
-                    "queued" -> "Menunggu…"
-                    "done" -> "Selesai · $size"
-                    "cancelled" -> "Dibatalkan"
-                    else -> "Gagal" + (d.error?.let { ": $it" } ?: "")
+                    "running" -> tr("Memuat turun…", "Downloading…") + " ${(d.progress * 100).toInt()}% · $size"
+                    "queued" -> tr("Menunggu…", "Waiting…")
+                    "done" -> tr("Selesai", "Done") + " · $size"
+                    "cancelled" -> tr("Dibatalkan", "Cancelled")
+                    else -> tr("Gagal", "Failed") + (d.error?.let { ": $it" } ?: "")
                 },
                 color = if (d.state == "failed") Palette.error else Palette.muted, fontSize = 12.sp,
             )
@@ -399,9 +498,9 @@ private fun DownloadRow(d: Download, navigator: Navigator) {
         }
         if (d.state == "done") TextButton(onClick = {
             navigator.open(Screen.Player(PlayRequest(null, d.file, d.title, d.poster, d.file, d.label, 0, localFile = d.file)))
-        }) { Text("▶ Main") }
-        if (d.state == "running" || d.state == "queued") TextButton(onClick = { Downloads.cancel(d.id) }) { Text("Batal") }
-        TextButton(onClick = { Downloads.delete(d.id) }) { Text("Padam", color = Palette.error) }
+        }) { Text(tr("▶ Main", "▶ Play")) }
+        if (d.state == "running" || d.state == "queued") TextButton(onClick = { Downloads.cancel(d.id) }) { Text(tr("Batal", "Cancel")) }
+        TextButton(onClick = { Downloads.delete(d.id) }) { Text(tr("Padam", "Delete"), color = Palette.error) }
     }
 }
 
@@ -429,9 +528,9 @@ private fun UpdateBanner() {
     ) {
         Text(
             when {
-                failed -> "Muat turun kemas kini gagal. Cuba lagi."
-                progress != null -> "Memuat turun CloudXtream ${r.version}… ${((progress ?: 0f) * 100).toInt()}%"
-                else -> "Versi baharu CloudXtream ${r.version} tersedia."
+                failed -> tr("Muat turun kemas kini gagal. Cuba lagi.", "The update download failed. Try again.")
+                progress != null -> tr("Memuat turun", "Downloading") + " CloudXtream ${r.version}… ${((progress ?: 0f) * 100).toInt()}%"
+                else -> tr("Versi baharu CloudXtream ${r.version} tersedia.", "CloudXtream ${r.version} is available.")
             },
             color = Palette.text, modifier = Modifier.weight(1f),
         )
@@ -443,6 +542,20 @@ private fun UpdateBanner() {
                     .onSuccess { cx.desktop.core.Updates.install(it); cx.desktop.player.Vlc.release(); kotlin.system.exitProcess(0) }
                     .onFailure { failed = true; progress = null }
             }
-        }) { Text("Kemas kini sekarang") }
+        }) { Text(tr("Kemas kini sekarang", "Update now")) }
     }
+}
+
+fun statusLabel(s: WatchStatus): String = when (s) {
+    WatchStatus.WATCHING -> tr("Sedang ditonton", "Watching")
+    WatchStatus.COMPLETED -> tr("Selesai", "Completed")
+    WatchStatus.ONHOLD -> tr("Ditangguhkan", "On hold")
+    WatchStatus.PLAN -> tr("Akan ditonton", "Plan to watch")
+    WatchStatus.DROPPED -> tr("Dihentikan", "Dropped")
+}
+
+private fun recentSearches(): List<String> = Settings.string("recent_searches")?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+
+private fun rememberSearch(q: String) {
+    Settings.set("recent_searches", (listOf(q) + recentSearches().filter { it != q }).take(8).joinToString("\n"))
 }

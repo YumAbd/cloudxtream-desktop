@@ -65,18 +65,24 @@ jobs:
           cat selftest.txt || true
           { echo '## Self test of the packaged app'; echo '```'; cat selftest.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
           grep -q "SELFTEST OK" selftest.txt
+      - name: Screenshots of the screens with real content
+        shell: bash
+        continue-on-error: true
+        timeout-minutes: 8
+        run: gradle --no-daemon :app:devPreview -Pshots="$PWD/shots-ui"
       - name: Publish the smoke test frame (screenshots branch)
         if: always()
         shell: bash
         run: |
-          [ -f selftest-frame.png ] || exit 0
+          [ -f selftest-frame.png ] || [ -d shots-ui ] || exit 0
           git clone -q --depth 1 -b screenshots "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots 2>/dev/null \
             || { git init -q -b screenshots shots; git -C shots remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"; }
-          cp selftest-frame.png shots/smoke-frame.png
+          cp selftest-frame.png shots/smoke-frame.png 2>/dev/null || true
+          cp shots-ui/*.png shots/ 2>/dev/null || true
           cd shots
           git config user.name YumAbd
           git config user.email 92353848+YumAbd@users.noreply.github.com
-          git add smoke-frame.png
+          git add -A
           git commit -q -m "Smoke test frame ${GITHUB_SHA::7}" || exit 0
           git push -q origin screenshots
       - name: Collect

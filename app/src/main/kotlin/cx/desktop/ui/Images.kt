@@ -20,17 +20,12 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.security.MessageDigest
 import java.time.Duration
 
 /** Posters: memory cache, then disk cache, then network (with the provider's headers). */
 object Images {
     private val dir = File(AppDirs.cache, "img").apply { mkdirs() }
-    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NORMAL).build()
     private val slots = Semaphore(8)
     private val memory = object : LinkedHashMap<String, ImageBitmap>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?) = size > 300
@@ -43,11 +38,11 @@ object Images {
             val file = File(dir, key)
             val bytes = if (file.exists()) file.readBytes() else slots.withPermit {
                 runCatching {
-                    val request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(20)).GET()
-                        .header("User-Agent", USER_AGENT)
+                    val request = okhttp3.Request.Builder().url(url).header("User-Agent", USER_AGENT)
                         .apply { headers?.forEach { (k, v) -> runCatching { header(k, v) } } }.build()
-                    val response = http.send(request, HttpResponse.BodyHandlers.ofByteArray())
-                    response.body().takeIf { response.statusCode() == 200 && it.isNotEmpty() }?.also { file.writeBytes(it) }
+                    cx.desktop.core.Net.client.newCall(request).execute().use { response ->
+                        response.body.bytes().takeIf { response.isSuccessful && it.isNotEmpty() }?.also { file.writeBytes(it) }
+                    }
                 }.getOrNull()
             } ?: return@withContext null
             runCatching { org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap() }.getOrNull()

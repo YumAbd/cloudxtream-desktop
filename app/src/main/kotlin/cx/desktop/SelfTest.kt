@@ -24,6 +24,7 @@ object SelfTest {
     /** Returns true when a video was decoded. Lines go to [log]. */
     fun run(frameFile: File, log: (String) -> Unit): Boolean = runBlocking {
     val out = frameFile
+    cx.desktop.core.Net.apply()
     val summary = Plugins.sync { _, _ -> }
     log("SMOKE extensions: ${summary.loaded}/${summary.total} loaded, offline=${summary.offline}, failures=${summary.failures}")
     log("SMOKE libVLC available: ${Vlc.available}")

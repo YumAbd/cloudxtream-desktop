@@ -61,7 +61,7 @@ object Plugins {
 
     /** Downloads what changed in the catalog, then loads every extension not loaded yet. */
     suspend fun sync(progress: (String, Float) -> Unit): Summary = withContext(Dispatchers.IO) {
-        progress("Menyemak katalog extension…", 0f)
+        progress(cx.desktop.ui.tr("Menyemak katalog extension…", "Checking the extension catalog…"), 0f)
         val fresh = runCatching { download(CATALOG_URL) }.getOrNull()
             ?.let { bytes -> runCatching { json.readValue<List<CatalogEntry>>(bytes) }.getOrNull()?.let { bytes to it } }
         if (fresh != null) catalogFile.writeAtomically(fresh.first)
@@ -77,7 +77,7 @@ object Plugins {
                     slots.withPermit {
                         runCatching { ensureDownloaded(entry) }.onFailure { failures += Failure(entry.name ?: entry.internalName, "muat turun gagal: " + describe(it)) }
                         synchronized(this@Plugins) { done++ }
-                        progress("Memuat turun extension ($done/${catalog.size})…", 0.5f * done / catalog.size.coerceAtLeast(1))
+                        progress(cx.desktop.ui.tr("Memuat turun extension", "Downloading extensions") + " ($done/${catalog.size})…", 0.5f * done / catalog.size.coerceAtLeast(1))
                     }
                 }
             }.awaitAll()
@@ -87,7 +87,7 @@ object Plugins {
         AppDirs.plugins.listFiles { f -> f.extension == "cs3" && f.name !in keep }?.forEach { it.delete() }
 
         catalog.forEachIndexed { i, entry ->
-            progress("Memuatkan ${entry.name ?: entry.internalName} (${i + 1}/${catalog.size})…", 0.5f + 0.5f * (i + 1) / catalog.size.coerceAtLeast(1))
+            progress(cx.desktop.ui.tr("Memuatkan ", "Loading ") + "${entry.name ?: entry.internalName} (${i + 1}/${catalog.size})…", 0.5f + 0.5f * (i + 1) / catalog.size.coerceAtLeast(1))
             val file = File(AppDirs.plugins, "${entry.internalName}.cs3")
             if (!file.exists() || file.name in loadedFiles) return@forEachIndexed
             runCatching { load(file) }.onSuccess { loadedFiles += file.name }

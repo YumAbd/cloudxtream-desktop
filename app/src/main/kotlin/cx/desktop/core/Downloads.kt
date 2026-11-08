@@ -12,9 +12,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -36,8 +33,6 @@ data class Download(
 
 object Downloads {
     private val index = File(AppDirs.root, "downloads.json")
-    private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault())
-        .connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NORMAL).build()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = mutableMapOf<String, Job>()
 
@@ -97,45 +92,49 @@ object Downloads {
         save()
     }
 
-    private fun request(url: String, headers: Map<String, String>, range: Long = 0): HttpRequest =
-        HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(60)).GET().apply {
-            headers.forEach { (k, v) -> runCatching { header(k, v) } }
-            if (range > 0) header("Range", "bytes=$range-")
-        }.build()
+    private fun request(url: String, headers: Map<String, String>): okhttp3.Request =
+        okhttp3.Request.Builder().url(url).apply { headers.forEach { (k, v) -> runCatching { header(k, v) } } }.build()
+
+    private fun bytes(url: String, headers: Map<String, String>): ByteArray =
+        Net.client.newCall(request(url, headers)).execute().use { r ->
+            require(r.isSuccessful) { "HTTP ${r.code}" }
+            r.body.bytes()
+        }
 
     private suspend fun progress(id: String, fraction: Float, bytes: Long) = withContext(Dispatchers.Main) {
         set(id) { it.copy(progress = fraction, bytes = bytes) }
     }
 
     private suspend fun direct(id: String, url: String, headers: Map<String, String>, file: File) {
-        val response = http.send(request(url, headers), HttpResponse.BodyHandlers.ofInputStream())
-        require(response.statusCode() in 200..299) { "HTTP ${response.statusCode()}" }
-        val total = response.headers().firstValueAsLong("Content-Length").orElse(-1)
-        var done = 0L
-        var last = 0L
-        response.body().use { input ->
-            file.outputStream().use { out ->
-                val buffer = ByteArray(256 * 1024)
-                while (true) {
-                    kotlin.coroutines.coroutineContext.ensureActive()
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    out.write(buffer, 0, n)
-                    done += n
-                    if (done - last > 2_000_000) {
-                        last = done
-                        progress(id, if (total > 0) done.toFloat() / total else 0f, done)
+        Net.client.newCall(request(url, headers)).execute().use { response ->
+            require(response.isSuccessful) { "HTTP ${response.code}" }
+            val total = response.body.contentLength()
+            var done = 0L
+            var last = 0L
+            response.body.byteStream().use { input ->
+                file.outputStream().use { out ->
+                    val buffer = ByteArray(256 * 1024)
+                    while (true) {
+                        kotlin.coroutines.coroutineContext.ensureActive()
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        out.write(buffer, 0, n)
+                        done += n
+                        if (done - last > 2_000_000) {
+                            last = done
+                            progress(id, if (total > 0) done.toFloat() / total else 0f, done)
+                        }
                     }
                 }
             }
         }
     }
 
-    private fun text(url: String, headers: Map<String, String>): Pair<String, URI> {
-        val response = http.send(request(url, headers), HttpResponse.BodyHandlers.ofString())
-        require(response.statusCode() in 200..299) { "HTTP ${response.statusCode()}" }
-        return response.body() to response.uri()
-    }
+    private fun text(url: String, headers: Map<String, String>): Pair<String, URI> =
+        Net.client.newCall(request(url, headers)).execute().use { r ->
+            require(r.isSuccessful) { "HTTP ${r.code}" }
+            r.body.string() to URI.create(r.request.url.toString())
+        }
 
     /** HLS: best variant, every segment in order (AES-128 decrypted), joined into one MPEG-TS file. */
     private suspend fun hls(id: String, url: String, headers: Map<String, String>, file: File) {
@@ -177,16 +176,12 @@ object Downloads {
                 kotlin.coroutines.coroutineContext.ensureActive()
                 var data: ByteArray? = null
                 for (attempt in 1..3) {
-                    data = runCatching {
-                        val r = http.send(request(s.uri, headers), HttpResponse.BodyHandlers.ofByteArray())
-                        require(r.statusCode() in 200..299) { "HTTP ${r.statusCode()}" }
-                        r.body()
-                    }.getOrNull()
+                    data = runCatching { bytes(s.uri, headers) }.getOrNull()
                     if (data != null) break
                 }
                 var chunk = data ?: error("segment ${i + 1} failed")
                 s.key?.let { k ->
-                    val keyBytes = keys.getOrPut(k) { http.send(request(k, headers), HttpResponse.BodyHandlers.ofByteArray()).body() }
+                    val keyBytes = keys.getOrPut(k) { bytes(k, headers) }
                     val ivBytes = s.iv ?: ByteArray(16).also { b -> for (j in 0 until 8) b[15 - j] = (s.sequence shr (8 * j)).toByte() }
                     chunk = Cipher.getInstance("AES/CBC/PKCS5Padding").apply {
                         init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(ivBytes))

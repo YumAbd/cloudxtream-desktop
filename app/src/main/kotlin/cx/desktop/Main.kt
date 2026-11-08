@@ -20,6 +20,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import cx.desktop.core.Activation
 import cx.desktop.core.Logs
+import cx.desktop.core.Net
 import cx.desktop.core.Plugins
 import cx.desktop.player.Vlc
 import cx.desktop.ui.AccountInfo
@@ -29,6 +30,7 @@ import cx.desktop.ui.CxTheme
 import cx.desktop.ui.LoadingScreen
 import cx.desktop.ui.MainScreens
 import cx.desktop.ui.Navigator
+import cx.desktop.ui.tr
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -45,10 +47,27 @@ fun main(args: Array<String>) {
         kotlin.system.exitProcess(if (ok) 0 else 1)
     }
     Logs.start()
+    Net.apply()
+    Thread.setDefaultUncaughtExceptionHandler { t, e -> System.err.println("Uncaught in ${t.name}: " + e.stackTraceToString().take(4000)) }
     System.setProperty("skiko.renderApi", System.getProperty("skiko.renderApi") ?: "DIRECT3D".takeIf { isWindows } ?: "OPENGL")
     application {
         val window = rememberWindowState(width = 1320.dp, height = 820.dp)
         AppWindow.state = window
+        // An error inside a screen must not close CloudXtream: it is logged, and the window is
+        // rebuilt (Home), keeping the activation and loaded extensions.
+        var restarts by remember { mutableStateOf(0) }
+        @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.window.LocalWindowExceptionHandlerFactory provides androidx.compose.ui.window.WindowExceptionHandlerFactory { _ ->
+                androidx.compose.ui.window.WindowExceptionHandler { e ->
+                    System.err.println("Screen error: " + e.stackTraceToString().take(6000))
+                    Vlc.stopAll()
+                    AppState.lastError = tr("Ralat berlaku dan skrin dimuat semula", "An error occurred and the screen was reloaded") + ": " + Plugins.describe(e)
+                    restarts++
+                }
+            },
+        ) {
+        androidx.compose.runtime.key(restarts) {
         Window(
             onCloseRequest = {
                 Vlc.release()
@@ -68,7 +87,17 @@ fun main(args: Array<String>) {
         ) {
             CxTheme { App() }
         }
+        }
+        }
     }
+}
+
+/** Survives a window rebuild after an error. */
+object AppState {
+    var authorized: Activation.Result.Authorized? = null
+    var extensionsLoaded = false
+    var loadWarning: String? = null
+    var lastError: String? = null
 }
 
 val isWindows = System.getProperty("os.name").orEmpty().startsWith("Windows")
@@ -99,8 +128,8 @@ private fun App() {
     var phase by remember { mutableStateOf<Phase>(Phase.Checking) }
     val scope = rememberCoroutineScope()
     val navigator = remember { Navigator() }
-    var pluginsLoaded by remember { mutableStateOf(false) }
-    var loadWarning by remember { mutableStateOf<String?>(null) }
+    var pluginsLoaded by remember { mutableStateOf(AppState.extensionsLoaded) }
+    var loadWarning by remember { mutableStateOf(AppState.lastError ?: AppState.loadWarning) }
 
     fun onRefused(result: Activation.Result.Refused) {
         phase = if (!Activation.isActivated || Activation.needsNewPin(result.code)) {
@@ -113,15 +142,18 @@ private fun App() {
 
     suspend fun afterAuthorized(result: Activation.Result.Authorized) {
         if (!pluginsLoaded) {
-            phase = Phase.Loading("Menyediakan extension…", 0f)
+            phase = Phase.Loading(tr("Menyediakan extension…", "Preparing extensions…"), 0f)
             val summary = Plugins.sync { text, fraction -> phase = Phase.Loading(text, fraction) }
             pluginsLoaded = true
+            AppState.extensionsLoaded = true
             loadWarning = when {
-                summary.loaded == 0 -> "Tiada extension dapat dimuatkan. Lihat Tetapan → Kemas kini → Extension untuk sebabnya."
-                summary.offline -> "Tiada sambungan ke server: extension yang sedia ada digunakan."
+                summary.loaded == 0 -> tr("Tiada extension dapat dimuatkan. Lihat Tetapan → Kemas kini → Extension untuk sebabnya.", "No extension could be loaded. See Settings → Updates → Extensions for the reason.")
+                summary.offline -> tr("Tiada sambungan ke server: extension yang sedia ada digunakan.", "No connection to the server: using the extensions already installed.")
                 else -> null
             }
         }
+        AppState.loadWarning = loadWarning
+        AppState.authorized = result
         phase = Phase.Ready(result.displayName, result.licenseExpiresMs, result.leaseMs)
     }
 
@@ -134,11 +166,17 @@ private fun App() {
     }
 
     LaunchedEffect(Unit) {
-        if (Activation.isActivated) check() else phase = Phase.NeedPin(null)
+        val known = AppState.authorized
+        AppState.lastError = null
+        when {
+            known != null && pluginsLoaded -> phase = Phase.Ready(known.displayName, known.licenseExpiresMs, known.leaseMs)
+            Activation.isActivated -> check()
+            else -> phase = Phase.NeedPin(null)
+        }
     }
 
     when (val p = phase) {
-        Phase.Checking -> LoadingScreen("Menyemak lesen…", null)
+        Phase.Checking -> LoadingScreen(tr("Menyemak lesen…", "Checking the license…"), null)
         is Phase.Loading -> LoadingScreen(p.text, p.fraction)
         is Phase.NeedPin -> ActivationScreen(p.message) { result ->
             scope.launch { afterAuthorized(result) }

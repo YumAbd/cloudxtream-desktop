@@ -30,7 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,7 +73,7 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
     LaunchedEffect(attempt) {
         error = null
         runCatching { withTimeout(45_000) { withContext(Dispatchers.IO) { screen.api.load(screen.url) } } }
-            .onSuccess { if (it == null) error = "Tiada maklumat." else details = it }
+            .onSuccess { if (it == null) error = tr("Tiada maklumat.", "No information.") else details = it }
             .onFailure { error = Plugins.describe(it) }
     }
     val d = details
@@ -74,8 +81,8 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (error == null) CircularProgressIndicator() else Column(horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Gagal membuka “${screen.title}”: $error", color = Palette.muted)
-                Button(onClick = { attempt++ }) { Text("Cuba lagi") }
+                Text(tr("Gagal membuka", "Could not open") + " “${screen.title}”: $error", color = Palette.muted)
+                Button(onClick = { attempt++ }) { Text(tr("Cuba lagi", "Try again")) }
             }
         }
         return
@@ -113,75 +120,96 @@ fun DetailsScreen(navigator: Navigator, screen: Screen.Details) {
         navigator.open(Screen.Player(PlayRequest(screen.api, screen.url, d.name, poster, item.data, item.label, startMs, following)))
     }
 
-    LazyColumn(contentPadding = PaddingValues(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+    LazyColumn(contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                RemoteImage(poster, d.posterHeaders, Modifier.size(240.dp, 360.dp).clip(RoundedCornerShape(12.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(d.name, color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                    val meta = listOfNotNull(
-                        d.year?.toString(), d.type.name, d.duration?.let { "$it min" },
-                        d.score?.toStringNull(0.1, 10, 1)?.let { "★ $it" }, screen.api.name,
-                    )
-                    Text(meta.joinToString("  •  "), color = Palette.muted)
-                    d.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            tags.take(10).forEach { Pill(it, false) {} }
-                        }
-                    }
-                    d.plot?.let { Text(it, color = Palette.text.copy(alpha = 0.85f), maxLines = 8, overflow = TextOverflow.Ellipsis) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val resumeData = saved?.takeIf { it.positionMs > 0 }?.let { it.episodeData ?: single }
-                        if (saved != null && resumeData != null) {
-                            Button(onClick = {
-                                play(Playable(resumeData, saved.episodeLabel, null, episodes.firstOrNull { it.data == resumeData }), saved.positionMs)
-                            }) { Text("▶  Sambung " + listOfNotNull(saved.episodeLabel, formatTime(saved.positionMs)).joinToString(" · ")) }
-                        }
-                        if (single != null) {
-                            if (resumeData != null) OutlinedButton(onClick = { play(Playable(single, null, null, null)) }) { Text("Dari awal") }
-                            else Button(onClick = { play(Playable(single, null, null, null)) }) { Text("▶  Tonton") }
-                        } else if (episodes.isNotEmpty() && resumeData == null) {
-                            Button(onClick = { episodes.first().let { play(Playable(it.data, episodeLabel(it), it.season, it)) } }) {
-                                Text("▶  Tonton episod pertama")
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
+                RemoteImage(d.backgroundPosterUrl ?: poster, d.posterHeaders, Modifier.fillMaxSize().blur(if (d.backgroundPosterUrl == null) 18.dp else 0.dp))
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Palette.background, 0.6f to Palette.background.copy(alpha = 0.7f), 1f to Palette.background.copy(alpha = 0.15f))))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Palette.background)))
+                Row(Modifier.align(Alignment.BottomStart).padding(32.dp), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+                    RemoteImage(poster, d.posterHeaders, Modifier.size(250.dp, 375.dp).clip(RoundedCornerShape(14.dp)))
+                    Column(Modifier.width(720.dp).align(Alignment.Bottom), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text(screen.api.name.uppercase(), color = Palette.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                        Text(d.name, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 40.sp)
+                        val meta = listOfNotNull(
+                            d.year?.toString(), d.score?.toStringNull(0.1, 10, 1)?.let { "★ $it" }, typeLabel(d.type.name),
+                            d.duration?.let { "$it min" }, d.contentRating,
+                            if (episodes.isNotEmpty()) tr("${episodes.size} episod", "${episodes.size} episodes") else null,
+                        )
+                        Text(meta.joinToString("   •   "), color = Color.White.copy(alpha = 0.85f))
+                        d.tags?.takeIf { it.isNotEmpty() }?.let { tags ->
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                tags.take(8).forEach { Text(it, color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 5.dp)) }
                             }
                         }
+                        d.plot?.let { Text(it, color = Color.White.copy(alpha = 0.8f), maxLines = 5, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val resumeData = saved?.takeIf { it.positionMs > 0 }?.let { it.episodeData ?: single }
+                            val white = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
+                            val glass = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.18f), contentColor = Color.White)
+                            if (saved != null && resumeData != null) {
+                                Button(colors = white, onClick = {
+                                    play(Playable(resumeData, saved.episodeLabel, null, episodes.firstOrNull { it.data == resumeData }), saved.positionMs)
+                                }) { Text("▶  " + tr("Sambung", "Resume") + " " + listOfNotNull(saved.episodeLabel, formatTime(saved.positionMs)).joinToString(" · "), fontWeight = FontWeight.Bold) }
+                            }
+                            if (single != null) {
+                                if (resumeData != null) Button(colors = glass, onClick = { play(Playable(single, null, null, null)) }) { Text(tr("Dari awal", "From the start")) }
+                                else Button(colors = white, onClick = { play(Playable(single, null, null, null)) }) { Text("▶  " + tr("Tonton", "Play"), fontWeight = FontWeight.Bold) }
+                                Button(colors = glass, onClick = { downloadFor = Playable(single, null, null, null) }) { Text("⬇  " + tr("Muat turun", "Download")) }
+                            } else if (episodes.isNotEmpty() && resumeData == null) {
+                                Button(colors = white, onClick = { episodes.first().let { play(Playable(it.data, episodeLabel(it), it.season, it)) } }) {
+                                    Text("▶  " + tr("Tonton episod 1", "Play episode 1"), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        LibraryActions(screen, d.name, poster, d.type.name)
+                        if (single == null && episodes.isEmpty()) Text(tr("Tiada video untuk tajuk ini.", "No video for this title."), color = Palette.muted)
                     }
-                    if (single == null && episodes.isEmpty()) Text("Tiada video untuk tajuk ini.", color = Palette.muted)
-                    LibraryActions(screen, d.name, poster, d.type.name)
-                    if (single != null) TextButton(onClick = { downloadFor = Playable(single, null, null, null) }) { Text("⬇  Muat turun") }
                 }
             }
         }
-        if (dubs.size > 1) item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                dubs.forEach { s -> Pill(if (s == DubStatus.Dubbed) "Alih suara" else if (s == DubStatus.Subbed) "Sarikata" else s.name, s == dub) { dub = s } }
+        if (episodes.isNotEmpty()) item {
+            Row(Modifier.padding(horizontal = 32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(tr("Episod", "Episodes"), color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                if (dubs.size > 1) dubs.forEach { s -> Pill(if (s == DubStatus.Dubbed) tr("Alih suara", "Dubbed") else if (s == DubStatus.Subbed) tr("Sarikata", "Subbed") else s.name, s == dub) { dub = s } }
             }
         }
         if (seasons.size > 1) item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                seasons.forEach { s -> Pill(s?.let { "Musim $it" } ?: "Lain-lain", s == season) { season = s } }
+            FlowRow(Modifier.padding(horizontal = 32.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                seasons.forEach { s -> Pill(s?.let { tr("Musim $it", "Season $it") } ?: tr("Lain-lain", "Other"), s == season) { season = s } }
             }
         }
         items(shown) { e ->
+            val hover = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            val hovered by hover.collectIsHoveredAsState()
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Palette.surface)
+                Modifier.padding(horizontal = 32.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(if (hovered) Palette.surfaceHigh else Palette.surface).hoverable(hover)
                     .clickable { play(Playable(e.data, episodeLabel(e), e.season, e)) }.padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (e.posterUrl != null) RemoteImage(e.posterUrl, d.posterHeaders, Modifier.size(160.dp, 90.dp).clip(RoundedCornerShape(8.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(episodeLabel(e).ifBlank { "Episod" }, color = Palette.text, fontWeight = FontWeight.SemiBold)
-                    e.description?.let { Text(it, color = Palette.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                Box(Modifier.size(178.dp, 100.dp).clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh), contentAlignment = Alignment.Center) {
+                    if (e.posterUrl != null) RemoteImage(e.posterUrl, d.posterHeaders, Modifier.fillMaxSize())
+                    else Text((e.episode ?: "▶").toString(), color = Palette.muted, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    if (hovered) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)), contentAlignment = Alignment.Center) {
+                        Text("▶", color = Color.White, fontSize = 28.sp)
+                    }
                 }
-                if (saved?.episodeData == e.data) Text("Sedang ditonton", color = Palette.primary, fontSize = 12.sp)
-                TextButton(onClick = { downloadFor = Playable(e.data, episodeLabel(e), e.season, e) }) { Text("⬇", fontSize = 16.sp) }
-                Text("▶", color = Palette.primary, fontSize = 18.sp, modifier = Modifier.width(24.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(episodeLabel(e).ifBlank { tr("Episod", "Episode") }, color = Palette.text, fontWeight = FontWeight.SemiBold)
+                    e.description?.let { Text(it, color = Palette.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    if (saved?.episodeData == e.data) Text(tr("Sedang ditonton · ", "Watching · ") + formatTime(saved.positionMs), color = Palette.primary, fontSize = 12.sp)
+                }
+                TextButton(onClick = { downloadFor = Playable(e.data, episodeLabel(e), e.season, e) }) { Text("⬇", fontSize = 18.sp) }
             }
+        }
+        d.recommendations?.takeIf { it.isNotEmpty() }?.let { recs ->
+            item { CardRow(tr("Anda mungkin suka", "More like this"), recs.map { it.toCard(navigator, screen.api) }) }
         }
     }
 }
-
 
 @Composable
 private fun LibraryActions(screen: Screen.Details, title: String, poster: String?, type: String) {
@@ -190,24 +218,24 @@ private fun LibraryActions(screen: Screen.Details, title: String, poster: String
     var open by remember { mutableStateOf(false) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            Pill((entry.status?.label ?: "+ Tambah ke senarai") + "  ▾", entry.status != null) { open = true }
+            Pill((entry.status?.let { statusLabel(it) } ?: tr("+ Tambah ke senarai", "+ Add to list")) + "  ▾", entry.status != null) { open = true }
             androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 cx.desktop.core.WatchStatus.entries.forEach { s ->
-                    androidx.compose.material3.DropdownMenuItem(text = { Text(s.label) }, onClick = {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text(statusLabel(s)) }, onClick = {
                         open = false
                         entry = cx.desktop.core.Library.update(base) { it.copy(status = s, title = title, poster = poster) }
                     })
                 }
-                if (entry.status != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Buang daripada senarai") }, onClick = {
+                if (entry.status != null) androidx.compose.material3.DropdownMenuItem(text = { Text(tr("Buang daripada senarai", "Remove from list")) }, onClick = {
                     open = false
                     entry = cx.desktop.core.Library.update(base) { it.copy(status = null) }
                 })
             }
         }
-        Pill(if (entry.favourite) "♥ Kegemaran" else "♡ Kegemaran", entry.favourite) {
+        Pill(if (entry.favourite) "♥ " + tr("Kegemaran", "Favourite") else "♡ " + tr("Kegemaran", "Favourite"), entry.favourite) {
             entry = cx.desktop.core.Library.update(base) { it.copy(favourite = !it.favourite, title = title, poster = poster) }
         }
-        Pill(if (entry.subscribed) "🔔 Dilanggan" else "🔔 Langgan", entry.subscribed) {
+        Pill(if (entry.subscribed) "🔔 " + tr("Dilanggan", "Subscribed") else "🔔 " + tr("Langgan", "Subscribe"), entry.subscribed) {
             entry = cx.desktop.core.Library.update(base) { it.copy(subscribed = !it.subscribed, title = title, poster = poster) }
         }
     }
@@ -231,16 +259,16 @@ private fun DownloadPicker(api: com.lagradost.cloudstream3.MainAPI, data: String
     }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Muat turun: " + title + (label?.let { " · $it" } ?: "")) },
+        title = { Text(tr("Muat turun: ", "Download: ") + title + (label?.let { " · $it" } ?: "")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (loading) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("Mencari sumber… (${links.size})", color = Palette.muted)
+                    Text(tr("Mencari sumber…", "Finding sources…") + " (${links.size})", color = Palette.muted)
                 }
                 val usable = links.filter { it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.VIDEO || it.type == com.lagradost.cloudstream3.utils.ExtractorLinkType.M3U8 }
                     .sortedByDescending { it.quality }
-                if (!loading && usable.isEmpty()) Text("Tiada sumber yang boleh dimuat turun.", color = Palette.muted)
+                if (!loading && usable.isEmpty()) Text(tr("Tiada sumber yang boleh dimuat turun.", "No downloadable source."), color = Palette.muted)
                 usable.take(12).forEach { link ->
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh).clickable {
@@ -255,6 +283,6 @@ private fun DownloadPicker(api: com.lagradost.cloudstream3.MainAPI, data: String
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Tutup") } },
+        confirmButton = { TextButton(onClick = onClose) { Text(tr("Tutup", "Close")) } },
     )
 }

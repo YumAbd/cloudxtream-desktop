@@ -1,6 +1,7 @@
 package cx.desktop.core
 
 import com.sun.jna.platform.win32.Crypt32Util
+import cx.desktop.ui.tr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -155,27 +156,27 @@ object Activation {
         val devices = (e as? ApiProblem)?.body?.optJSONArray("devices")?.let { list ->
             (0 until list.length()).mapNotNull { i ->
                 val d = list.optJSONObject(i) ?: return@mapNotNull null
-                Device(d.optString("id"), d.optString("label").ifBlank { "Peranti tanpa nama" }, d.optLong("last_seen_ms"))
+                Device(d.optString("id"), d.optString("label").ifBlank { tr("Peranti tanpa nama", "Unnamed device") }, d.optLong("last_seen_ms"))
             }
         }.orEmpty()
         return Result.Refused(code, message(code), devices)
     }
 
     fun message(code: String): String = when (code) {
-        "pin_not_found", "invalid_pin" -> "PIN tidak sah. Semak semula 6 aksara PIN, atau minta PIN daripada admin CloudXtream."
-        "pin_expired" -> "PIN ini telah TAMAT TEMPOH. Sila hubungi admin CloudXtream untuk mendapatkan PIN baharu."
-        "pin_replaced" -> "PIN ini telah digantikan dengan PIN yang lebih baharu. Sila guna PIN terkini daripada admin CloudXtream."
-        "license_inactive" -> "Lesen anda sedang DIGANTUNG atau DIBATALKAN. Sila hubungi admin CloudXtream."
-        "license_expired" -> "Lesen anda telah TAMAT TEMPOH. Hubungi admin CloudXtream untuk menyambungnya."
-        "device_revoked" -> "PC ini telah DIKELUARKAN daripada lesen (mungkin diganti dengan peranti lain). Masukkan PIN baharu daripada admin CloudXtream."
-        "device_limit_reached" -> "Had peranti lesen ini sudah PENUH. Pilih peranti lama untuk diganti dengan PC ini, atau minta admin CloudXtream menambah had."
-        "device_not_found" -> "Peranti yang dipilih sudah tiada dalam lesen. Cuba aktifkan semula."
-        "too_many_attempts" -> "Terlalu banyak percubaan. Tunggu 15 minit dan cuba lagi."
-        "not_authorized" -> "PC ini tidak lagi dibenarkan. Masukkan PIN baharu daripada admin CloudXtream."
-        "DNS_UNREACHABLE" -> "Server CloudXtream tidak dapat dicari. Semak sambungan Internet, matikan VPN/DNS peribadi, atau cuba rangkaian lain."
-        "NETWORK_TIMEOUT", "CONNECTION_FAILED" -> "Tiada sambungan ke server CloudXtream. Semak Internet dan cuba lagi."
-        "TLS_ERROR" -> "Sambungan selamat ke server CloudXtream GAGAL. Semak tarikh & masa PC, kemudian cuba lagi."
-        else -> "Pengaktifan gagal ($code). Cuba lagi, atau hubungi admin CloudXtream."
+        "pin_not_found", "invalid_pin" -> tr("PIN tidak sah. Semak semula 6 aksara PIN, atau minta PIN daripada admin CloudXtream.", "Invalid PIN. Check the 6 characters, or ask the CloudXtream admin for a PIN.")
+        "pin_expired" -> tr("PIN ini telah TAMAT TEMPOH. Sila hubungi admin CloudXtream untuk mendapatkan PIN baharu.", "This PIN has EXPIRED. Contact the CloudXtream admin for a new PIN.")
+        "pin_replaced" -> tr("PIN ini telah digantikan dengan PIN yang lebih baharu. Sila guna PIN terkini daripada admin CloudXtream.", "This PIN was replaced by a newer one. Use the latest PIN from the CloudXtream admin.")
+        "license_inactive" -> tr("Lesen anda sedang DIGANTUNG atau DIBATALKAN. Sila hubungi admin CloudXtream.", "Your license is SUSPENDED or REVOKED. Contact the CloudXtream admin.")
+        "license_expired" -> tr("Lesen anda telah TAMAT TEMPOH. Hubungi admin CloudXtream untuk menyambungnya.", "Your license has EXPIRED. Contact the CloudXtream admin to renew it.")
+        "device_revoked" -> tr("PC ini telah DIKELUARKAN daripada lesen (mungkin diganti dengan peranti lain). Masukkan PIN baharu daripada admin CloudXtream.", "This PC was REMOVED from the license (maybe replaced by another device). Enter a new PIN from the CloudXtream admin.")
+        "device_limit_reached" -> tr("Had peranti lesen ini sudah PENUH. Pilih peranti lama untuk diganti dengan PC ini, atau minta admin CloudXtream menambah had.", "This license has no free device slot. Choose an old device to replace, or ask the CloudXtream admin for more devices.")
+        "device_not_found" -> tr("Peranti yang dipilih sudah tiada dalam lesen. Cuba aktifkan semula.", "The chosen device is no longer on the license. Try activating again.")
+        "too_many_attempts" -> tr("Terlalu banyak percubaan. Tunggu 15 minit dan cuba lagi.", "Too many attempts. Wait 15 minutes and try again.")
+        "not_authorized" -> tr("PC ini tidak lagi dibenarkan. Masukkan PIN baharu daripada admin CloudXtream.", "This PC is no longer authorized. Enter a new PIN from the CloudXtream admin.")
+        "DNS_UNREACHABLE" -> tr("Server CloudXtream tidak dapat dicari. Semak sambungan Internet, matikan VPN/DNS peribadi, atau cuba rangkaian lain.", "The CloudXtream server cannot be found. Check the Internet connection, turn off VPN/private DNS, or try another network.")
+        "NETWORK_TIMEOUT", "CONNECTION_FAILED" -> tr("Tiada sambungan ke server CloudXtream. Semak Internet dan cuba lagi.", "No connection to the CloudXtream server. Check the Internet and try again.")
+        "TLS_ERROR" -> tr("Sambungan selamat ke server CloudXtream GAGAL. Semak tarikh & masa PC, kemudian cuba lagi.", "The secure connection to the CloudXtream server FAILED. Check the PC date and time, then try again.")
+        else -> tr("Pengaktifan gagal ($code). Cuba lagi, atau hubungi admin CloudXtream.", "Activation failed ($code). Try again, or contact the CloudXtream admin.")
     }
 
     /** Errors that mean this PC must be activated again (the others are temporary). */

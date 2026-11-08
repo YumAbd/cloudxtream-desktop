@@ -70,6 +70,11 @@ object History {
         file.writeAtomically(json.writeValueAsBytes(entries))
     }
 
+    @Synchronized fun clear() {
+        entries.clear()
+        file.writeAtomically(json.writeValueAsBytes(entries))
+    }
+
     @Synchronized fun remove(provider: String, url: String) {
         entries.removeAll { it.provider == provider && it.url == url }
         file.writeAtomically(json.writeValueAsBytes(entries))
