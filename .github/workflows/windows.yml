@@ -84,5 +84,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --title "CloudXtream untuk Windows $GITHUB_REF_NAME" \
-            --notes "Pasang **CloudXtream-${{ steps.version.outputs.version }}-setup.exe** (atau .msi). Aktifkan dengan PIN daripada admin CloudXtream."
+          cat > notes.md <<NOTES
+          ## CloudXtream untuk Windows ${GITHUB_REF_NAME}
+
+          **Cara pasang:** muat turun **CloudXtream-${{ steps.version.outputs.version }}-setup.exe**, buka, dan ikut arahan.
+          Jika Windows SmartScreen memaparkan amaran, tekan **More info → Run anyway** (installer belum ditandatangani).
+
+          Selepas dipasang, buka CloudXtream dan masukkan **PIN pengaktifan daripada admin CloudXtream**
+          (PC ini dikira sebagai satu peranti dalam lesen anda).
+
+          - Windows 10/11 (64-bit). VLC sudah disertakan: tiada perisian lain perlu dipasang.
+          - Extension sama seperti app Android, dikemas kini secara automatik daripada katalog CloudXtream.
+          - Versi baharu dipaparkan dalam app dan boleh dipasang terus.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --title "CloudXtream untuk Windows $GITHUB_REF_NAME" --notes-file notes.md
