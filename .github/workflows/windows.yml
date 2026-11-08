@@ -5,6 +5,10 @@ on:
     tags: ['v*']
     paths-ignore: ['phase0/**', 'scripts/**', '**.md']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v1.0.0); empty = build only
+        default: ''
 
 permissions:
   contents: write
@@ -61,7 +65,13 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; else echo "version=1.0.0" >> "$GITHUB_OUTPUT"; fi
+          tag="${{ inputs.tag }}"
+          [[ -z "$tag" && "$GITHUB_REF" == refs/tags/v* ]] && tag="$GITHUB_REF_NAME"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=1.0.0" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build the installers
         shell: bash
         run: gradle --no-daemon -PappVersion=${{ steps.version.outputs.version }} :app:packageMsi :app:packageExe
@@ -79,13 +89,14 @@ jobs:
           path: dist
           retention-days: 14
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.version.outputs.tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           cat > notes.md <<NOTES
-          ## CloudXtream untuk Windows ${GITHUB_REF_NAME}
+          ## CloudXtream untuk Windows ${TAG}
 
           **Cara pasang:** muat turun **CloudXtream-${{ steps.version.outputs.version }}-setup.exe**, buka, dan ikut arahan.
           Jika Windows SmartScreen memaparkan amaran, tekan **More info → Run anyway** (installer belum ditandatangani).
@@ -97,4 +108,4 @@ jobs:
           - Extension sama seperti app Android, dikemas kini secara automatik daripada katalog CloudXtream.
           - Versi baharu dipaparkan dalam app dan boleh dipasang terus.
           NOTES
-          gh release create "$GITHUB_REF_NAME" dist/* --title "CloudXtream untuk Windows $GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$TAG" dist/* --title "CloudXtream untuk Windows $TAG" --notes-file notes.md --target "$GITHUB_SHA"
