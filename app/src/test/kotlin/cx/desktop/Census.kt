@@ -46,7 +46,16 @@ fun main(args: Array<String>) = runBlocking(Dispatchers.IO) {
             }
         }
         if (pages.isNotEmpty() && ok == 0 && error == null) error = "no response"
-        return Count(api.name, api.sourcePlugin.orEmpty(), pages.size, urls.toSet(), if (urls.isEmpty()) error ?: "empty" else null)
+        // Sites behind Cloudflare often refuse datacenter IPs (this job runs on GitHub, in the US)
+        // while users in Malaysia see the content: report that as "blocked", not as an empty extension.
+        val host = runCatching { java.net.URI(api.mainUrl).host.removePrefix("www.") }.getOrNull()
+        val refusal = Net.refusals.entries.firstOrNull { (h, _) -> host != null && h.removePrefix("www.").endsWith(host) }?.value
+        val reason = when {
+            urls.isNotEmpty() -> null
+            refusal != null -> "blocked: $refusal"
+            else -> error ?: "empty"
+        }
+        return Count(api.name, api.sourcePlugin.orEmpty(), pages.size, urls.toSet(), reason)
     }
 
     val counts = providers.map { api -> async { slots.withPermit { count(api) } } }.awaitAll()

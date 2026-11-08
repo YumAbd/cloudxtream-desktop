@@ -32,8 +32,19 @@ object Net {
     @Volatile var client: OkHttpClient = build()
         private set
 
+    /** Last refusal per host (HTTP 403/429/503, Cloudflare challenge), for diagnostics. */
+    val refusals = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private fun build(): OkHttpClient {
         val base = OkHttpClient.Builder()
+            .addNetworkInterceptor { chain ->
+                val response = chain.proceed(chain.request())
+                if (response.code in setOf(401, 403, 429, 503)) {
+                    val cloudflare = response.header("cf-mitigated") != null || response.header("server").orEmpty().contains("cloudflare", true)
+                    refusals[chain.request().url.host] = "HTTP ${response.code}" + if (cloudflare) " Cloudflare" else ""
+                }
+                response
+            }
             .followRedirects(true)
             .followSslRedirects(true)
             .proxySelector(java.net.ProxySelector.getDefault())
