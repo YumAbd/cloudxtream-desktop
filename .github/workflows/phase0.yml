@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  PYTHONUTF8: '1' # summaries use emoji; the Windows console code page cannot print them
   # Official CloudStream commit the Android app is built from.
   UPSTREAM_SHA: 5024ace2922a148d38df2a816b483b529789cf58
   CATALOG_URL: https://raw.githubusercontent.com/YumAbd/cloudstream-leque/apk-build/sumber.json
