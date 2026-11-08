@@ -47,15 +47,19 @@ jobs:
         id: wix
         uses: actions/cache@v5
         with:
-          path: build/wix311.zip
-          key: wix3112rtm
-      - name: WiX download with retries
+          path: build/wix311
+          key: wix-3.14.1-nuget
+      - name: WiX from NuGet (the GitHub release download times out)
         if: steps.wix.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          mkdir -p build
-          curl -fsSL --retry 8 --retry-all-errors --retry-delay 10 -o build/wix311.zip \
-            https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip
+          set -euo pipefail
+          curl -fsSL --retry 6 --retry-all-errors --retry-delay 5 -o wix.nupkg https://www.nuget.org/api/v2/package/WiX/3.14.1
+          7z x -y -bso0 wix.nupkg -owix-nupkg
+          mkdir -p build/wix311
+          cp -r wix-nupkg/tools/* build/wix311/
+          ls build/wix311 | head -20
+          test -f build/wix311/candle.exe && test -f build/wix311/light.exe
       - name: Version
         id: version
         shell: bash
@@ -69,7 +73,7 @@ jobs:
           fi
       - name: Build the installers
         shell: bash
-        run: gradle --no-daemon -PappVersion=${{ steps.version.outputs.version }} :app:createDistributable :app:packageMsi :app:packageExe -x downloadWix
+        run: gradle --no-daemon -PappVersion=${{ steps.version.outputs.version }} :app:createDistributable :app:packageMsi :app:packageExe -x downloadWix -x unzipWix
       - name: Self test of the packaged app (bundled Java runtime and VLC)
         shell: bash
         run: |
