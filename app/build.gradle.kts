@@ -55,7 +55,7 @@ compose.desktop {
             licenseFile.set(rootProject.file("LICENSE"))
             // Bundled VLC (resources/windows/vlc), downloaded by the release workflow.
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
-            modules("java.net.http", "java.sql", "java.naming", "jdk.unsupported", "jdk.crypto.ec", "jdk.accessibility")
+            modules("java.net.http", "java.sql", "java.naming", "jdk.unsupported", "jdk.crypto.ec", "jdk.accessibility", "jdk.httpserver")
             windows {
                 iconFile.set(project.file("icons/icon.ico"))
                 menu = true

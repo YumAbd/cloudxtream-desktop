@@ -73,6 +73,7 @@ fun MainScreens(navigator: Navigator, displayName: String, licenseExpiresMs: Lon
             Text(it, color = Palette.text, fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().background(Palette.surfaceHigh).padding(horizontal = 24.dp, vertical = 8.dp))
         }
+        UpdateBanner()
         Box(Modifier.weight(1f)) {
             when (screen) {
                 Screen.Home -> HomeScreen(navigator)
@@ -288,5 +289,37 @@ private fun Section(title: String, content: @Composable () -> Unit) {
         Text(title, color = Palette.primary, fontWeight = FontWeight.SemiBold)
         content()
         Spacer(Modifier.height(2.dp))
+    }
+}
+
+@Composable
+private fun UpdateBanner() {
+    var release by remember { mutableStateOf<cx.desktop.core.Updates.Release?>(null) }
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(Unit) { release = cx.desktop.core.Updates.check() }
+    val r = release ?: return
+    Row(
+        Modifier.fillMaxWidth().background(Palette.primary.copy(alpha = 0.25f)).padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            when {
+                failed -> "Muat turun kemas kini gagal. Cuba lagi."
+                progress != null -> "Memuat turun CloudXtream ${r.version}… ${((progress ?: 0f) * 100).toInt()}%"
+                else -> "Versi baharu CloudXtream ${r.version} tersedia."
+            },
+            color = Palette.text, modifier = Modifier.weight(1f),
+        )
+        if (progress == null) TextButton(onClick = {
+            failed = false
+            progress = 0f
+            scope.launch {
+                runCatching { cx.desktop.core.Updates.download(r) { progress = it } }
+                    .onSuccess { cx.desktop.core.Updates.install(it); cx.desktop.player.Vlc.release(); kotlin.system.exitProcess(0) }
+                    .onFailure { failed = true; progress = null }
+            }
+        }) { Text("Kemas kini sekarang") }
     }
 }

@@ -137,13 +137,19 @@ class VideoPlayer {
         timeMs = startMs
         lengthMs = 0
         val lower = headers.mapKeys { it.key.lowercase() }
+        // Sources that need more headers than VLC can send are played through the local proxy.
+        val all = buildMap {
+            putAll(headers)
+            referer?.takeIf { it.isNotBlank() }?.let { if (keys.none { k -> k.equals("referer", true) }) put("Referer", it) }
+        }
+        val mrl = if (HeaderProxy.needed(all)) HeaderProxy.wrap(url, all) else url
         val options = buildList {
             add(":network-caching=3000")
             (referer?.takeIf { it.isNotBlank() } ?: lower["referer"])?.let { add(":http-referrer=$it") }
             add(":http-user-agent=" + (lower["user-agent"] ?: cx.desktop.ui.Images.USER_AGENT))
             if (startMs > 0) add(":start-time=${startMs / 1000}")
         }
-        player.submit { player.media().play(url, *options.toTypedArray()) }
+        player.submit { player.media().play(mrl, *options.toTypedArray()) }
     }
 
     fun addSubtitle(url: String) {
