@@ -36,7 +36,7 @@ object Activation {
     const val ORIGIN = "https://cloudxpanel.infopc.xyz"
     private const val SCHEME = "rsa-pkcs1-sha256"
     private const val MIN_LEASE_S = 30L
-    private const val MAX_LEASE_S = 600L
+    private const val MAX_LEASE_S = 86_400L
     private val keyFile = File(AppDirs.root, "device.key")
     private val publicFile = File(AppDirs.root, "device.pub")
     private val http = HttpClient.newBuilder().proxy(java.net.ProxySelector.getDefault()).connectTimeout(Duration.ofSeconds(10))
@@ -56,6 +56,25 @@ object Activation {
 
     fun forgetDevice() {
         Settings.set("device_id", null)
+        clearLease()
+    }
+
+    /**
+     * The last successful check counts until its lease ends (24 hours from the server), even after a
+     * restart, so the PC contacts the server about once a day. A clock moved backwards invalidates it.
+     */
+    fun savedLease(): Result.Authorized? {
+        if (!isActivated) return null
+        val at = Settings.long("verified_at_ms") ?: return null
+        val until = Settings.long("verified_until_ms") ?: return null
+        val now = System.currentTimeMillis()
+        if (now < at - 60_000 || now >= until || until - at > MAX_LEASE_S * 1000) return null
+        return Result.Authorized(Settings.string("display_name").orEmpty(), Settings.long("license_expires_ms"), until - now)
+    }
+
+    private fun clearLease() {
+        Settings.set("verified_at_ms", null)
+        Settings.set("verified_until_ms", null)
     }
 
     suspend fun activate(pin: String, replaceDeviceId: String? = null): Result = withContext(Dispatchers.IO) {
@@ -89,12 +108,18 @@ object Activation {
                 .put("device_id", deviceId).put("challenge_id", challengeId)
                 .put("signature", signature).put("signature_scheme", SCHEME))
             if (!valid.optBoolean("authorized", false) || valid.optString("device_id") != deviceId) {
+                clearLease()
                 return@withContext Result.Refused("not_authorized", message("not_authorized"))
             }
             val expires = if (valid.isNull("license_expires_ms")) null else valid.optLong("license_expires_ms").takeIf { it > 0 }
             Settings.set("license_expires_ms", expires)
             val lease = valid.optLong("revalidate_in", 60L).coerceIn(MIN_LEASE_S, MAX_LEASE_S) * 1000L - 5_000L
-            Result.Authorized(valid.optString("display_name", "").trim().take(40), expires, lease)
+            val name = valid.optString("display_name", "").trim().take(40)
+            val now = System.currentTimeMillis()
+            Settings.set("display_name", name)
+            Settings.set("verified_at_ms", now)
+            Settings.set("verified_until_ms", now + lease)
+            Result.Authorized(name, expires, lease)
         } catch (e: Exception) {
             refused(e)
         }
@@ -145,6 +170,7 @@ object Activation {
     }
 
     private fun refused(e: Exception): Result.Refused {
+        if (e is ApiProblem) clearLease()
         val code = when (e) {
             is ApiProblem -> e.code
             is UnknownHostException -> "DNS_UNREACHABLE"

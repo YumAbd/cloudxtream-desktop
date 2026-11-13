@@ -172,6 +172,8 @@ private fun App() {
         AppState.lastError = null
         when {
             known != null && pluginsLoaded -> phase = Phase.Ready(known.displayName, known.licenseExpiresMs, known.leaseMs)
+            // Checked online within the last day: start without contacting the server.
+            Activation.savedLease() != null -> afterAuthorized(Activation.savedLease()!!)
             Activation.isActivated -> check()
             else -> phase = Phase.NeedPin(null)
         }
