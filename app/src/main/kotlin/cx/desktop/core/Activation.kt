@@ -28,9 +28,11 @@ import javax.net.ssl.SSLException
 
 /**
  * CloudXtream activation, the same protocol as the Android app (Cloudflare Worker, protocol v1):
- * this PC has its own RSA key; the PIN registers its public key on the license, and each start
- * proves possession of the private key. On Windows the private key is encrypted with DPAPI, so the
- * file is useless on another PC or user account.
+ * this PC has its own RSA key and the PIN registers its public key on the license. On Windows the
+ * private key is encrypted with DPAPI, so the file is useless on another PC or user account.
+ *
+ * Since 1.1.3 the PIN is entered once: an activated PC is not checked again. A reinstall on the same
+ * PC gets its device slot back with the same PIN (the server matches a hash of the Windows MachineGuid).
  */
 object Activation {
     const val ORIGIN = "https://cloudxpanel.infopc.xyz"
@@ -43,13 +45,10 @@ object Activation {
         .followRedirects(HttpClient.Redirect.NEVER).build()
     private val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
 
-    /** A device in the "replace a device" list when the license is full. */
-    data class Device(val id: String, val label: String, val lastSeenMs: Long)
-
     sealed interface Result {
         data class Authorized(val displayName: String, val licenseExpiresMs: Long?, val leaseMs: Long) : Result
         /** [code] is the server's error code (pin_expired, device_limit_reached...), or a connection problem. */
-        data class Refused(val code: String, val message: String, val devices: List<Device> = emptyList()) : Result
+        data class Refused(val code: String, val message: String) : Result
     }
 
     val isActivated: Boolean get() = Settings.string("device_id") != null
@@ -59,17 +58,42 @@ object Activation {
         clearLease()
     }
 
+    /** An activated PC is always allowed: the license is not checked again (1.1.3). */
+    fun saved(): Result.Authorized? =
+        if (!isActivated) null else Result.Authorized(Settings.string("display_name").orEmpty(), null, Long.MAX_VALUE)
+
     /**
-     * The last successful check counts until its lease ends (24 hours from the server), even after a
-     * restart, so the PC contacts the server about once a day. A clock moved backwards invalidates it.
+     * SHA-256 of the Windows MachineGuid. It survives uninstalling and reinstalling the app, so the
+     * server can give a reinstall its old device slot. Null when it cannot be read.
      */
-    fun savedLease(): Result.Authorized? {
-        if (!isActivated) return null
-        val at = Settings.long("verified_at_ms") ?: return null
-        val until = Settings.long("verified_until_ms") ?: return null
-        val now = System.currentTimeMillis()
-        if (now < at - 60_000 || now >= until || until - at > MAX_LEASE_S * 1000) return null
-        return Result.Authorized(Settings.string("display_name").orEmpty(), Settings.long("license_expires_ms"), until - now)
+    private fun hardwareId(): String? = try {
+        val guid = if (!windows) null else com.sun.jna.platform.win32.Advapi32Util.registryGetStringValue(
+            com.sun.jna.platform.win32.WinReg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", "MachineGuid")
+        guid?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+            java.security.MessageDigest.getInstance("SHA-256").digest(("cloudxtream-hardware:" + value.lowercase()).toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }
+    } catch (e: Throwable) { null }
+
+    /**
+     * PCs activated before 1.1.3 send their hardware id once (a signed check), so they can also be
+     * reinstalled with their PIN. The answer never locks the app.
+     */
+    suspend fun registerHardwareOnce() = withContext(Dispatchers.IO) {
+        if (Settings.string("hardware_registered") == "1") return@withContext
+        val deviceId = Settings.string("device_id") ?: return@withContext
+        val hardware = hardwareId() ?: return@withContext
+        try {
+            val (challengeId, signature) = signedChallenge(deviceId)
+            post("/api/device/verify", JSONObject()
+                .put("device_id", deviceId).put("challenge_id", challengeId)
+                .put("signature", signature).put("signature_scheme", SCHEME).put("hardware_id", hardware))
+            Settings.set("hardware_registered", "1")
+        } catch (e: ApiProblem) {
+            Settings.set("hardware_registered", "1") // refused: nothing to register, never ask again
+        } catch (e: Exception) {
+            // Offline: try again at the next start.
+        }
     }
 
     private fun clearLease() {
@@ -77,7 +101,8 @@ object Activation {
         Settings.set("verified_until_ms", null)
     }
 
-    suspend fun activate(pin: String, replaceDeviceId: String? = null): Result = withContext(Dispatchers.IO) {
+    /** Once per install. Only the CloudXtream admin can free a device slot. */
+    suspend fun activate(pin: String): Result = withContext(Dispatchers.IO) {
         try {
             val challenge = post("/api/device/challenge", JSONObject().put("purpose", "activate"))
             val challengeId = challenge.getString("challenge_id")
@@ -90,10 +115,14 @@ object Activation {
                 .put("signature_scheme", SCHEME)
                 .put("device_label", deviceLabel())
                 .put("pin", pin.trim().uppercase())
-            if (replaceDeviceId != null) body.put("replace_device_id", replaceDeviceId)
+            hardwareId()?.let { body.put("hardware_id", it) }
             val response = post("/api/device/activate", body)
+            val name = response.optString("display_name", "").takeIf { it != "null" }.orEmpty().trim().take(40)
             Settings.set("device_id", response.getString("device_id"))
-            verify()
+            Settings.set("display_name", name)
+            Settings.set("hardware_registered", "1")
+            Settings.set("activated_ms", System.currentTimeMillis())
+            Result.Authorized(name, null, Long.MAX_VALUE)
         } catch (e: Exception) {
             refused(e)
         }
@@ -179,23 +208,17 @@ object Activation {
             is SSLException -> "TLS_ERROR"
             else -> if (e.cause is UnknownHostException) "DNS_UNREACHABLE" else e.javaClass.simpleName
         }
-        val devices = (e as? ApiProblem)?.body?.optJSONArray("devices")?.let { list ->
-            (0 until list.length()).mapNotNull { i ->
-                val d = list.optJSONObject(i) ?: return@mapNotNull null
-                Device(d.optString("id"), d.optString("label").ifBlank { tr("Peranti tanpa nama", "Unnamed device") }, d.optLong("last_seen_ms"))
-            }
-        }.orEmpty()
-        return Result.Refused(code, message(code), devices)
+        return Result.Refused(code, message(code))
     }
 
     fun message(code: String): String = when (code) {
-        "pin_not_found", "invalid_pin" -> tr("PIN tidak sah. Semak semula 6 aksara PIN, atau minta PIN daripada admin CloudXtream.", "Invalid PIN. Check the 6 characters, or ask the CloudXtream admin for a PIN.")
+        "pin_not_found", "invalid_pin" -> tr("PIN tidak sah. Semak semula PIN (8 aksara), atau minta PIN daripada admin CloudXtream.", "Invalid PIN. Check the 8 characters, or ask the CloudXtream admin for a PIN.")
         "pin_expired" -> tr("PIN ini telah TAMAT TEMPOH. Sila hubungi admin CloudXtream untuk mendapatkan PIN baharu.", "This PIN has EXPIRED. Contact the CloudXtream admin for a new PIN.")
         "pin_replaced" -> tr("PIN ini telah digantikan dengan PIN yang lebih baharu. Sila guna PIN terkini daripada admin CloudXtream.", "This PIN was replaced by a newer one. Use the latest PIN from the CloudXtream admin.")
         "license_inactive" -> tr("Lesen anda sedang DIGANTUNG atau DIBATALKAN. Sila hubungi admin CloudXtream.", "Your license is SUSPENDED or REVOKED. Contact the CloudXtream admin.")
         "license_expired" -> tr("Lesen anda telah TAMAT TEMPOH. Hubungi admin CloudXtream untuk menyambungnya.", "Your license has EXPIRED. Contact the CloudXtream admin to renew it.")
-        "device_revoked" -> tr("PC ini telah DIKELUARKAN daripada lesen (mungkin diganti dengan peranti lain). Masukkan PIN baharu daripada admin CloudXtream.", "This PC was REMOVED from the license (maybe replaced by another device). Enter a new PIN from the CloudXtream admin.")
-        "device_limit_reached" -> tr("Had peranti lesen ini sudah PENUH. Pilih peranti lama untuk diganti dengan PC ini, atau minta admin CloudXtream menambah had.", "This license has no free device slot. Choose an old device to replace, or ask the CloudXtream admin for more devices.")
+        "device_revoked" -> tr("Pengaktifan PC ini tidak lagi sah. Masukkan PIN baharu daripada admin CloudXtream.", "This PC's activation is no longer valid. Enter a new PIN from the CloudXtream admin.")
+        "device_limit_reached" -> tr("PIN ini sudah digunakan pada peranti lain. Hubungi admin CloudXtream.", "This PIN is already used on another device. Contact the CloudXtream admin.")
         "device_not_found" -> tr("Peranti yang dipilih sudah tiada dalam lesen. Cuba aktifkan semula.", "The chosen device is no longer on the license. Try activating again.")
         "too_many_attempts" -> tr("Terlalu banyak percubaan. Tunggu 15 minit dan cuba lagi.", "Too many attempts. Wait 15 minutes and try again.")
         "not_authorized" -> tr("PC ini tidak lagi dibenarkan. Masukkan PIN baharu daripada admin CloudXtream.", "This PC is no longer authorized. Enter a new PIN from the CloudXtream admin.")

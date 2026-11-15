@@ -74,69 +74,42 @@ fun ActivationScreen(initialMessage: String?, onAuthorized: (Activation.Result.A
     var pin by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf(initialMessage) }
-    var replaceChoices by remember { mutableStateOf<List<Activation.Device>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
-    fun activate(replace: String? = null) {
-        if (busy || (pin.length != 6 && pin.length != 16)) return
+    // 8 characters; PINs issued earlier (6 or 16) still work.
+    fun valid() = pin.length == 8 || pin.length == 6 || pin.length == 16
+    fun activate() {
+        if (busy || !valid()) return
         busy = true
         message = null
         scope.launch {
-            when (val result = Activation.activate(pin, replace)) {
+            when (val result = Activation.activate(pin)) {
                 is Activation.Result.Authorized -> onAuthorized(result)
-                is Activation.Result.Refused -> {
-                    message = result.message
-                    if (result.code == "device_limit_reached" && result.devices.isNotEmpty()) replaceChoices = result.devices
-                }
+                is Activation.Result.Refused -> message = result.message
             }
             busy = false
         }
     }
 
     Centered {
-        Text(tr("Masukkan PIN pengaktifan daripada admin CloudXtream.", "Enter the activation PIN from the CloudXtream admin."), color = Palette.muted, textAlign = TextAlign.Center)
+        Text(tr("Masukkan PIN pengaktifan daripada admin CloudXtream. PIN hanya perlu dimasukkan sekali.", "Enter the activation PIN from the CloudXtream admin. The PIN is only needed once."), color = Palette.muted, textAlign = TextAlign.Center)
         OutlinedTextField(
             value = pin,
             onValueChange = { value -> pin = value.filter { it.isLetterOrDigit() }.uppercase().take(16) },
             singleLine = true,
-            label = { Text(tr("PIN (6 aksara)", "PIN (6 characters)")) },
+            label = { Text(tr("PIN (8 aksara)", "PIN (8 characters)")) },
             enabled = !busy,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { activate() }),
             modifier = Modifier.fillMaxWidth(),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 22.sp, letterSpacing = 6.sp, color = Palette.text),
         )
-        Button(onClick = { activate() }, enabled = !busy && (pin.length == 6 || pin.length == 16), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Button(onClick = { activate() }, enabled = !busy && valid(), modifier = Modifier.fillMaxWidth().height(48.dp)) {
             if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(tr("Aktifkan", "Activate"))
         }
         message?.let { Text(it, color = Palette.error, textAlign = TextAlign.Center) }
         androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Lang.choices.forEach { (code, label) -> Pill(label, Lang.code == code) { Lang.set(code) } }
         }
-    }
-
-    if (replaceChoices.isNotEmpty()) {
-        val format = SimpleDateFormat("d MMM yyyy, HH:mm")
-        AlertDialog(
-            onDismissRequest = { replaceChoices = emptyList() },
-            title = { Text(tr("Had peranti penuh", "Device limit reached")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("Pilih peranti lama yang akan digantikan dengan PC ini. Peranti itu tidak lagi boleh digunakan.", "Choose the old device this PC replaces. That device will no longer work."), color = Palette.muted)
-                    Spacer(Modifier.height(4.dp))
-                    replaceChoices.forEach { device ->
-                        Column(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Palette.surfaceHigh)
-                                .handCursor().clickable { replaceChoices = emptyList(); activate(device.id) }.padding(12.dp)
-                        ) {
-                            Text(device.label, color = Palette.text, fontWeight = FontWeight.SemiBold)
-                            if (device.lastSeenMs > 0) Text(tr("Terakhir digunakan: ", "Last used: ") + format.format(Date(device.lastSeenMs)), color = Palette.muted, fontSize = 12.sp)
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { replaceChoices = emptyList() }) { Text(tr("Batal", "Cancel")) } },
-        )
     }
 }

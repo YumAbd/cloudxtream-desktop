@@ -282,8 +282,6 @@ private fun Account(account: AccountInfo) {
     var confirm by remember { mutableStateOf(false) }
     Group(tr("Lesen", "License")) {
         Text(tr("Pengguna: ", "User: ") + account.displayName.ifBlank { "-" }, color = Palette.text)
-        Text(tr("Tamat tempoh: ", "Expires: ") + (account.licenseExpiresMs?.let { SimpleDateFormat("d MMM yyyy, HH:mm").format(Date(it)) } ?: tr("Tiada (tanpa had)", "Never")),
-            color = Palette.text)
         Text(tr("Peranti ini: ", "This device: ") + (System.getenv("COMPUTERNAME")?.let { "Windows PC ($it)" } ?: "Windows PC"), color = Palette.text)
         Text(tr("Untuk menambah atau mengeluarkan peranti, hubungi admin CloudXtream.", "To add or remove devices, contact the CloudXtream admin."), color = Palette.muted, fontSize = 12.sp)
     }

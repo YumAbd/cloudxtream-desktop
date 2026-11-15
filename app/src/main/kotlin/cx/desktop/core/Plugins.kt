@@ -35,6 +35,8 @@ data class CatalogEntry(
     val iconUrl: String? = null,
     val language: String? = null,
     val status: Int? = null,
+    /** What it contains, written by the admin (e.g. "Kdrama & Kmovies"); shown when it is added. */
+    val summary: String? = null,
 )
 
 /**

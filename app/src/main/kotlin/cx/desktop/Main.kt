@@ -27,6 +27,7 @@ import cx.desktop.ui.AccountInfo
 import cx.desktop.ui.ActivationScreen
 import cx.desktop.ui.BlockedScreen
 import cx.desktop.ui.CxTheme
+import cx.desktop.ui.ExtensionNewsDialog
 import cx.desktop.ui.LoadingScreen
 import cx.desktop.ui.MainScreens
 import cx.desktop.ui.Navigator
@@ -172,9 +173,11 @@ private fun App() {
         AppState.lastError = null
         when {
             known != null && pluginsLoaded -> phase = Phase.Ready(known.displayName, known.licenseExpiresMs, known.leaseMs)
-            // Checked online within the last day: start without contacting the server.
-            Activation.savedLease() != null -> afterAuthorized(Activation.savedLease()!!)
-            Activation.isActivated -> check()
+            // Activated once: start without contacting the server (the license is not checked again).
+            Activation.saved() != null -> {
+                scope.launch { Activation.registerHardwareOnce() }
+                afterAuthorized(Activation.saved()!!)
+            }
             else -> phase = Phase.NeedPin(null)
         }
     }
@@ -193,29 +196,8 @@ private fun App() {
                 navigator.home()
                 phase = Phase.NeedPin(null)
             }, loadWarning)
-            // The license is checked again before each lease ends, like the Android app.
-            LaunchedEffect(p) {
-                delay(p.leaseMs)
-                var failures = 0
-                while (true) {
-                    when (val result = Activation.verify()) {
-                        is Activation.Result.Authorized -> {
-                            phase = Phase.Ready(result.displayName, result.licenseExpiresMs, result.leaseMs)
-                            return@LaunchedEffect
-                        }
-                        is Activation.Result.Refused -> {
-                            // A short network outage should not stop a film; a refusal from the server does.
-                            val network = result.code in setOf("DNS_UNREACHABLE", "NETWORK_TIMEOUT", "CONNECTION_FAILED", "IOException")
-                            if (!network || ++failures >= 4) {
-                                Vlc.stopAll()
-                                onRefused(result)
-                                return@LaunchedEffect
-                            }
-                            delay(30_000)
-                        }
-                    }
-                }
-            }
+            // Extensions the admin added or removed since this PC last showed them: once.
+            ExtensionNewsDialog()
         }
     }
 }
