@@ -49,7 +49,10 @@ fun main(args: Array<String>) {
     }
     Logs.start()
     Net.apply()
-    Thread.setDefaultUncaughtExceptionHandler { t, e -> System.err.println("Uncaught in ${t.name}: " + e.stackTraceToString().take(4000)) }
+    Thread.setDefaultUncaughtExceptionHandler { t, e ->
+        System.err.println("Uncaught in ${t.name}: " + e.stackTraceToString().take(4000))
+        CrashReports.record(t.name, e)
+    }
     System.setProperty("skiko.renderApi", System.getProperty("skiko.renderApi") ?: "DIRECT3D".takeIf { isWindows } ?: "OPENGL")
     application {
         val window = rememberWindowState(width = 1320.dp, height = 820.dp)
@@ -99,6 +102,7 @@ object AppState {
     var extensionsLoaded = false
     var loadWarning: String? = null
     var lastError: String? = null
+    var startScreenApplied = false
 }
 
 val isWindows = System.getProperty("os.name").orEmpty().startsWith("Windows")
@@ -157,6 +161,16 @@ private fun App() {
         }
         AppState.loadWarning = loadWarning
         AppState.authorized = result
+        // Live TV sources and the first screen (admin: Films or Live TV; the user's choice in Settings wins).
+        if (!AppState.startScreenApplied) {
+            AppState.startScreenApplied = true
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { cx.desktop.core.Live.refreshIfOld() } }
+            when (cx.desktop.core.Live.startScreen()) {
+                "live" -> navigator.root(cx.desktop.ui.Screen.Live)
+                "radio" -> navigator.root(cx.desktop.ui.Screen.Radio)
+            }
+            scope.launch { CrashReports.sendPending() }
+        }
         phase = Phase.Ready(result.displayName, result.licenseExpiresMs, result.leaseMs)
     }
 
@@ -199,5 +213,24 @@ private fun App() {
             // Extensions the admin added or removed since this PC last showed them: once.
             ExtensionNewsDialog()
         }
+    }
+}
+
+/** An uncaught error is kept and sent once to CloudXtream Control on the next start (admin panel, Telegram). */
+object CrashReports {
+    private val file get() = java.io.File(cx.desktop.core.AppDirs.root, "last_crash.txt")
+    fun record(thread: String, e: Throwable) {
+        runCatching { file.writeText("Thread: $thread\n" + e.stackTraceToString().take(6000)) }
+    }
+    suspend fun sendPending() {
+        val f = file
+        if (!f.isFile) return
+        val text = runCatching { f.readText() }.getOrNull() ?: return
+        val lines = text.lines().map { it.trim() }
+        val first = lines.drop(1).firstOrNull { it.isNotBlank() }.orEmpty()
+        val at = lines.firstOrNull { it.startsWith("at cx.desktop") }.orEmpty()
+        val sent = cx.desktop.core.Activation.reportCrash("App crash (Windows)", first.take(200), (at + "\n" + text).take(3000),
+            cx.desktop.core.AppInfo.version)
+        if (sent) f.delete()
     }
 }

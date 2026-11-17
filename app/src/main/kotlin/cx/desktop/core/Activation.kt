@@ -170,6 +170,31 @@ object Activation {
         }
     }
 
+    /** A signed request (like an online check) to a device endpoint, e.g. /api/device/live. */
+    fun signedPost(path: String, extra: JSONObject = JSONObject()): JSONObject {
+        val deviceId = Settings.string("device_id") ?: throw IOException("not_activated")
+        val (challengeId, signature) = signedChallenge(deviceId)
+        val body = JSONObject(extra.toString()).put("device_id", deviceId).put("challenge_id", challengeId)
+            .put("signature", signature).put("signature_scheme", SCHEME)
+        return post(path, body, 2_000_000)
+    }
+
+    /** Crash reports and problem reports, with a longer detail for a crash. */
+    suspend fun reportCrash(title: String, source: String, detail: String, appVersion: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val deviceId = Settings.string("device_id") ?: return@withContext false
+            val (challengeId, signature) = signedChallenge(deviceId)
+            post("/api/device/report", JSONObject()
+                .put("device_id", deviceId).put("challenge_id", challengeId)
+                .put("signature", signature).put("signature_scheme", SCHEME).put("kind", "crash")
+                .put("title", title.take(200)).put("source", source.take(200))
+                .put("detail", detail.take(3000)).put("app_version", appVersion.take(20)))
+                .optBoolean("ok", false)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun signedChallenge(deviceId: String): Pair<String, String> {
         val challenge = post("/api/device/challenge", JSONObject().put("purpose", "verify").put("device_id", deviceId))
         val challengeId = challenge.getString("challenge_id")
@@ -179,7 +204,7 @@ object Activation {
 
     private class ApiProblem(val status: Int, val code: String, val body: JSONObject) : IOException(code)
 
-    private fun post(path: String, data: JSONObject): JSONObject {
+    private fun post(path: String, data: JSONObject, maxBytes: Int = 16_384): JSONObject {
         val request = HttpRequest.newBuilder(URI.create(ORIGIN + path))
             .timeout(Duration.ofSeconds(15))
             .header("Accept", "application/json")
@@ -189,7 +214,7 @@ object Activation {
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofByteArray())
         val bytes = response.body()
-        if (bytes.size > 16_384) throw IOException("response_too_large")
+        if (bytes.size > maxBytes) throw IOException("response_too_large")
         val body = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrElse { JSONObject() }
         if (response.statusCode() !in 200..299) {
             val code = body.optString("error", "unknown").take(60).takeIf { Regex("^[a-z0-9_]+$").matches(it) } ?: "unknown"

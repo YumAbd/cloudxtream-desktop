@@ -6,6 +6,8 @@ import com.lagradost.cloudstream3.MainAPI
 /** The screens after activation; Back returns to the previous one. */
 sealed interface Screen {
     data object Home : Screen
+    data object Live : Screen
+    data object Radio : Screen
     data class Search(val query: String = "") : Screen
     data object Library : Screen
     data object Downloads : Screen
@@ -26,6 +28,8 @@ data class PlayRequest(
     val startMs: Long,
     /** Following episodes, for "Next episode". */
     val next: List<Pair<String, String?>> = emptyList(),
+    /** Live TV: the channels before this one (Page Up). */
+    val prev: List<Pair<String, String?>> = emptyList(),
     val localFile: String? = null,
 )
 

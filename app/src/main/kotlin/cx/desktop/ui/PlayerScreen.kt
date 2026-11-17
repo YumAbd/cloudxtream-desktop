@@ -103,8 +103,9 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     val seekMs = cx.desktop.core.Prefs.seekSeconds * 1000L
     val scope = rememberCoroutineScope()
 
+    val live = request.api === LiveApi
     fun start(link: ExtractorLink, at: Long) {
-        if (link.type == ExtractorLinkType.M3U8 || link.type == ExtractorLinkType.VIDEO) cx.desktop.core.Library.get(request.api?.name ?: "", request.url)
+        if (!live && (link.type == ExtractorLinkType.M3U8 || link.type == ExtractorLinkType.VIDEO)) cx.desktop.core.Library.get(request.api?.name ?: "", request.url)
             ?: request.api?.let { api ->
                 cx.desktop.core.Library.update(cx.desktop.core.LibraryEntry(api.name, request.url, request.title, request.poster)) {
                     it.copy(status = it.status ?: cx.desktop.core.WatchStatus.WATCHING)
@@ -117,6 +118,7 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
     }
 
     fun save() {
+        if (live) return // Live TV is not "Continue watching"
         val api = request.api ?: return
         if (player.timeMs < 5_000) return
         History.save(WatchEntry(
@@ -244,6 +246,13 @@ fun PlayerScreen(request: PlayRequest, onBack: () -> Unit, onPlayNext: (PlayRequ
                     Key.DirectionDown -> { player.volume = player.volume - 10; true }
                     Key.F -> { AppWindow.toggleFullscreen(); true }
                     Key.Backspace -> { onBack(); true }
+                    // Live TV: next / previous channel of the list.
+                    Key.PageDown, Key.N -> if (live) { request.next.firstOrNull()?.let { (data, label) ->
+                        onPlayNext(request.copy(title = label ?: request.title, episodeData = data, startMs = 0,
+                            next = request.next.drop(1), prev = listOf(request.episodeData to request.title) + request.prev)) }; true } else false
+                    Key.PageUp, Key.P -> if (live) { request.prev.firstOrNull()?.let { (data, label) ->
+                        onPlayNext(request.copy(title = label ?: request.title, episodeData = data, startMs = 0,
+                            prev = request.prev.drop(1), next = listOf(request.episodeData to request.title) + request.next)) }; true } else false
                     else -> false
                 }
             }

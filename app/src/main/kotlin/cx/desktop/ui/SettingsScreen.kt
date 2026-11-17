@@ -129,6 +129,20 @@ private fun General() {
             Lang.choices.forEach { (code, label) -> Pill(label, Lang.code == code) { Lang.set(code) } }
         }
     }
+    var start by remember { mutableStateOf(cx.desktop.core.Live.startScreen()) }
+    Group(tr("Menu utama", "First screen")) {
+        Choice(tr("Dibuka dahulu semasa app dibuka", "Opened first when the app starts"),
+            listOf("home" to tr("Filem", "Films"), "live" to "Live TV", "radio" to "Radio"), start) {
+            start = it; cx.desktop.core.Settings.set("start_screen", it)
+        }
+    }
+    var liveAdult by remember { mutableStateOf(cx.desktop.core.Live.showAdult) }
+    Group("Live TV") {
+        Toggle(tr("Tunjuk kategori dewasa (18+)", "Show adult (18+) categories"),
+            tr("Disembunyikan secara lalai dalam playlist IPTV.", "Hidden by default in IPTV playlists."), liveAdult) {
+            liveAdult = it; cx.desktop.core.Live.showAdult = it
+        }
+    }
     Group(tr("Media pilihan", "Preferred media")) {
         Text(tr("Jenis kandungan yang dipaparkan di Utama dan Cari. Sumber lain disembunyikan.", "Content types shown in Home and Search. Other sources are hidden."), color = Palette.muted, fontSize = 12.sp)
         Prefs.allTypes.forEach { (id, _) ->

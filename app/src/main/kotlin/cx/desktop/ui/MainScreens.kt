@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -104,7 +107,7 @@ fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
     // Keeps each screen's scroll position while the player or another screen is open.
     val saved = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     if (screen is Screen.Player) {
-        PlayerScreen(screen.request, onBack = { navigator.back() }, onPlayNext = { navigator.replace(Screen.Player(it)) })
+        key(screen.request) { PlayerScreen(screen.request, onBack = { navigator.back() }, onPlayNext = { navigator.replace(Screen.Player(it)) }) }
         return
     }
     Row(Modifier.fillMaxSize().background(Palette.background)) {
@@ -122,6 +125,8 @@ fun MainScreens(navigator: Navigator, account: AccountInfo, warning: String?) {
                 saved.SaveableStateProvider(screenKey(screen)) {
                 when (screen) {
                     Screen.Home -> HomeScreen(navigator)
+                    Screen.Live -> LiveScreen(navigator, radio = false)
+                    Screen.Radio -> LiveScreen(navigator, radio = true)
                     is Screen.Search -> key(screen.query) { SearchScreen(navigator, screen.query) }
                     Screen.Library -> LibraryScreen(navigator)
                     Screen.Downloads -> DownloadsScreen(navigator)
@@ -147,8 +152,10 @@ private fun NavRail(navigator: Navigator, account: AccountInfo) {
     ) {
         Image(painterResource("icon.png"), null, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).handCursor().clickable { navigator.home() })
         Spacer(Modifier.height(14.dp))
-        RailItem(Icons.Filled.Home, tr("Utama", "Home"), root == Screen.Home) { navigator.root(Screen.Home) }
+        RailItem(Icons.Filled.LiveTv, "Live TV", root == Screen.Live) { navigator.root(Screen.Live) }
+        RailItem(Icons.Filled.Movie, tr("Filem", "Films"), root == Screen.Home) { navigator.root(Screen.Home) }
         RailItem(Icons.Filled.Search, tr("Cari", "Search"), root is Screen.Search) { navigator.root(Screen.Search()) }
+        RailItem(Icons.Filled.Radio, "Radio", root == Screen.Radio) { navigator.root(Screen.Radio) }
         RailItem(Icons.Filled.VideoLibrary, tr("Pustaka", "Library"), root == Screen.Library) { navigator.root(Screen.Library) }
         RailItem(Icons.Filled.Download, tr("Muat turun", "Downloads"), root == Screen.Downloads) { navigator.root(Screen.Downloads) }
         RailItem(Icons.Filled.Settings, tr("Tetapan", "Settings"), root is Screen.Settings && (root as Screen.Settings).section != "account") {
@@ -574,6 +581,8 @@ private fun rememberSearch(q: String) {
 
 private fun screenKey(screen: Screen): String = when (screen) {
     Screen.Home -> "home"
+    Screen.Live -> "live"
+    Screen.Radio -> "radio"
     is Screen.Search -> "search:" + screen.query
     Screen.Library -> "library"
     Screen.Downloads -> "downloads"
